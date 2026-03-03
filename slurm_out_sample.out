@@ -1,0 +1,45 @@
+setup.sh: line 1: cd: /data/quokka/ws/9/s4122485-parallelDD/parallel-unsupervised-concept-drift-detection-main: No such file or directory
+
+The following have been reloaded with a version change:
+  1) release/24.10 => release/25.06
+
+Modules GCCcore/14.2.0, zlib/1.3.1, binutils/2.42, binutils/2.42 and 1 dependency unloaded.
+Modules GCC/14.2.0, zlib/1.3.1, binutils/2.42, GCCcore/14.2.0, binutils/2.42, Python/3.13.1 and 11 dependencies loaded.
+INFO:__main__:Copied datasets/files/PokerHand.csv -> /tmp/PokerHand.csv
+[I 2026-02-10 21:56:08,806] A new study created in memory with name: ibdd_optimization
+================================================================================
+Single Drift Detector Hyperparameter Optimization
+================================================================================
+Trials per detector: 1000
+Parallel jobs: 1
+Detectors to optimize: ['IBDD']
+Fixed parameters:
+  - Dataset: PokerHand
+  - Classifier: HoeffdingTreeClassifier
+  - Training samples: 1600
+  - Seed: 42
+  - Recent samples size: optimized (50-5000)
+================================================================================
+
+
+================================================================================
+Optimizing IBDD
+================================================================================
+  0%|          | 0/1000 [00:00<?, ?it/s]INFO:__main__:IBDD Trial 0: accuracy=0.9215, runtime=1634.8s, drifts=8589
+  0%|          | 1/1000 [27:15<453:45:18, 1635.15s/it][I 2026-02-10 22:23:23,970] Trial 0 finished with values: [0.9214528795969981, 1634.7715196609497] and parameters: {'recent_samples_size': 1904, 'n_samples': 1907, 'n_consecutive_deviations': 15, 'n_permutations': 639, 'update_interval': 24}.
+INFO:__main__:IBDD Trial 1: accuracy=0.8936, runtime=1419.5s, drifts=9410
+  0%|          | 2/1000 [50:55<418:11:59, 1508.54s/it][I 2026-02-10 22:47:03,874] Trial 1 finished with values: [0.8936441965566627, 1419.4880027770996] and parameters: {'recent_samples_size': 822, 'n_samples': 210, 'n_consecutive_deviations': 18, 'n_permutations': 641, 'update_interval': 74}.
+INFO:__main__:IBDD Trial 2: accuracy=0.9105, runtime=1468.1s, drifts=7301
+  0%|          | 3/1000 [1:15:23<412:43:03, 1490.25s/it][I 2026-02-10 23:11:32,373] Trial 2 finished with values: [0.9105352172697128, 1468.1228349208832] and parameters: {'recent_samples_size': 151, 'n_samples': 1943, 'n_consecutive_deviations': 17, 'n_permutations': 291, 'update_interval': 26}.
+INFO:__main__:IBDD Trial 3: accuracy=0.8956, runtime=2330.1s, drifts=12183
+  0%|          | 4/1000 [1:54:14<504:04:54, 1821.98s/it][I 2026-02-10 23:50:22,894] Trial 3 finished with values: [0.8955606591275314, 2330.1257770061493] and parameters: {'recent_samples_size': 958, 'n_samples': 678, 'n_consecutive_deviations': 11, 'n_permutations': 489, 'update_interval': 36}.
+INFO:__main__:IBDD Trial 4: accuracy=0.8751, runtime=4161.5s, drifts=16194
+  0%|          | 5/1000 [3:03:35<736:47:19, 2665.77s/it][I 2026-02-11 00:59:44,779] Trial 4 finished with values: [0.8750546306844665, 4161.469633579254] and parameters: {'recent_samples_size': 3079, 'n_samples': 365, 'n_consecutive_deviations': 6, 'n_permutations': 430, 'update_interval': 51}.
+INFO:__main__:IBDD Trial 5: accuracy=0.8777, runtime=3335.1s, drifts=11113
+  1%|          | 6/1000 [3:59:11<798:55:11, 2893.47s/it][I 2026-02-11 01:55:20,265] Trial 5 finished with values: [0.8777095911506161, 3335.0775606632233] and parameters: {'recent_samples_size': 3937, 'n_samples': 479, 'n_consecutive_deviations': 11, 'n_permutations': 633, 'update_interval': 14}.
+INFO:__main__:IBDD Trial 6: accuracy=0.8755, runtime=3722.3s, drifts=14370
+  1%|          | 7/1000 [5:01:14<872:53:38, 3164.57s/it][I 2026-02-11 02:57:22,978] Trial 6 finished with values: [0.8755425235562668, 3722.3166074752808] and parameters: {'recent_samples_size': 3057, 'n_samples': 424, 'n_consecutive_deviations': 2, 'n_permutations': 954, 'update_interval': 97}.
+INFO:__main__:IBDD Trial 7: accuracy=0.8700, runtime=5443.6s, drifts=21280
+  1%|          | 8/1000 [6:31:58<1071:58:32, 3890.23s/it][I 2026-02-11 04:28:06,983] Trial 7 finished with values: [0.8700292130396936, 5443.601008892059] and parameters: {'recent_samples_size': 4052, 'n_samples': 679, 'n_consecutive_deviations': 2, 'n_permutations': 716, 'update_interval': 50}.
+INFO:__main__:IBDD Trial 8: accuracy=0.8740, runtime=4406.4s, drifts=30226
+  1%|          | 9/1000 [7:45:24<1115:21:05, 4051.73s/it][I 2026-02-11 05:41:33,816] Trial 8 finished with values: [0.8739723075395792, 4406.441434144974] and parameters: {'recent_samples_size': 654, 'n_samples': 1041, 'n_consecutive_deviations': 1, 'n_permutations': 919, 'update_interval': 33}.
