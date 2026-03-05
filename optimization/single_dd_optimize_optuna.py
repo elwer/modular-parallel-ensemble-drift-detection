@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Fixed parameters
 DATASET = None  # Set from CLI argument
 CLASSIFIER = 'HoeffdingTreeClassifier'
-N_TRAINING_SAMPLES = 1600
+N_TRAINING_SAMPLES = 2000
 SEED = 42
 TRIAL_TIMEOUT = 3600  # 60 minutes per trial
 

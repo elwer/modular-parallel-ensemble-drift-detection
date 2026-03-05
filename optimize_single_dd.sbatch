@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=SingleDD
 #SBATCH --cpu-freq=2000000
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=1
 #SBATCH --ntasks=1
 #SBATCH --time=144:00:00
 #SBATCH --mem-per-cpu=4096
