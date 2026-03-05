@@ -18,12 +18,6 @@ for DATASET in "${DATASETS[@]}"; do
                --export=ALL,DETECTOR="${DETECTOR}",N_TRIALS="${N_SUCCESSFUL}",DATASET="${DATASET}" \
                "${SBATCH_TEMPLATE}"
     done
-
-    # Submit EWDD ensemble optimization
-    echo "  Submitting job for EWDD on ${DATASET} (target: ${N_SUCCESSFUL} successful runs)..."
-    sbatch --job-name="DD_EWDD_${DATASET}" \
-           --export=ALL,N_TRIALS="${N_SUCCESSFUL}",DATASET="${DATASET}" \
-           "${SCRIPT_DIR}/optimize_ewdd.sbatch"
 done
 
 echo "All jobs submitted."

@@ -23,6 +23,5 @@ from .slidShaps import SlidShaps
 from .windowKDE import WindowKDE
 #from .nnbdd import NNBDD
 from .cdleeds import CDLEEDS
-from .ewdd import EWDD
 # Baselines
 from .dummyDDs import DummyDDBL1, DummyDDBL2
