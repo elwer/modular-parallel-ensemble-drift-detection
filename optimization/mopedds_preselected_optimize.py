@@ -1,5 +1,5 @@
 """
-EWDD Pre-Selected Ensemble Optimization using Optuna.
+MOPEDDS Pre-Selected Ensemble Optimization using Optuna.
 
 Instead of optimizing all ~28 hyperparameters jointly, this script:
   1. Reads the single-DD optimization results from results/<DD>_<Dataset>.csv
@@ -13,8 +13,8 @@ This drastically reduces the search space and leverages already-found good
 configurations for each ensemble member.
 
 Outputs:
-  - results/EWDD_<Dataset>_PreSelected.csv   — all trial results
-  - results/EWDD_<Dataset>_PreSelected.config — config metadata
+  - results/MOPEDDS_<Dataset>_PreSelected.csv   — all trial results
+  - results/MOPEDDS_<Dataset>_PreSelected.config — config metadata
 """
 
 import os
@@ -45,7 +45,7 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import datasets
-from detectors.ewdd import EWDD
+from detectors.mopedds import MOPEDDS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ TRIAL_TIMEOUT = 3600  # 60 minutes per trial
 # All single drift detectors that can be ensemble members
 SINGLE_DD_NAMES = ['BNDM', 'CSDDM', 'D3', 'IBDD', 'OCDD', 'SPLL', 'UDetect']
 
-# Mapping from detector name to its class path (for EWDD config YAML)
+# Mapping from detector name to its class path (for MOPEDDS config YAML)
 DD_CLASS_PATHS = {
     'BNDM': 'detectors.bndm.BNDM',
     'CSDDM': 'detectors.csddm.CSDDM',
@@ -191,10 +191,10 @@ def load_single_dd_candidates(results_dir, dataset_name):
     return candidates
 
 
-# ── EWDD config creation from pre-selected params ────────────────────────────
+# ── MOPEDDS config creation from pre-selected params ────────────────────────────
 
-def create_ewdd_config_from_candidates(ensemble_params, detector_configs):
-    """Create a temporary EWDD YAML config file.
+def create_mopedds_config_from_candidates(ensemble_params, detector_configs):
+    """Create a temporary MOPEDDS YAML config file.
 
     Args:
         ensemble_params: dict with decision_criteria, decision_window, suppression_window
@@ -278,8 +278,8 @@ def make_objective(candidates, optimize_detector_selection=False):
         if len(detector_configs) < 2:
             return 0.0, float('inf')
 
-        # Create EWDD config and run
-        config_path = create_ewdd_config_from_candidates(ensemble_params, detector_configs)
+        # Create MOPEDDS config and run
+        config_path = create_mopedds_config_from_candidates(ensemble_params, detector_configs)
 
         try:
             signal.signal(signal.SIGALRM, _timeout_handler)
@@ -289,7 +289,7 @@ def make_objective(candidates, optimize_detector_selection=False):
             dataset = dataset_class(directory_path='/tmp')
             stream = iter(dataset)
 
-            detector = EWDD(
+            detector = MOPEDDS(
                 seed=SEED,
                 recent_samples_size=recent_samples_size,
                 config_path=config_path,
@@ -462,7 +462,7 @@ def load_existing_trials(csv_path, study, candidates, optimize_detector_selectio
 # ── Config file generation ────────────────────────────────────────────────────
 
 def write_best_config(trial, candidates, output_path):
-    """Write the EWDD .config YAML for the best trial."""
+    """Write the MOPEDDS .config YAML for the best trial."""
     params = trial.params
 
     detector_configs = []
@@ -491,7 +491,7 @@ def write_best_config(trial, candidates, output_path):
         })
 
     with open(output_path, 'w') as f:
-        f.write(f"# EWDD Pre-Selected Configuration\n")
+        f.write(f"# MOPEDDS Pre-Selected Configuration\n")
         f.write(f"# Generated from single-DD Pareto-optimal configs\n")
         f.write(f"# Accuracy: {trial.values[0]:.4f}, Runtime: {trial.values[1]:.1f}s\n")
         f.write(f"# recent_samples_size: {params['recent_samples_size']}\n")
@@ -504,7 +504,7 @@ def write_best_config(trial, candidates, output_path):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = ArgumentParser(description='EWDD optimization with pre-selected single-DD configs.')
+    parser = ArgumentParser(description='MOPEDDS optimization with pre-selected single-DD configs.')
     parser.add_argument('--n_trials', type=int, default=500,
                         help='Number of optimization trials (default: 500)')
     parser.add_argument('--n_candidates', type=int, default=None,
@@ -550,7 +550,7 @@ def main():
 
     # ── Step 3: Set up Optuna study ──────────────────────────────────────
     os.makedirs(args.output_dir, exist_ok=True)
-    results_csv = os.path.join(args.output_dir, f'EWDD_{DATASET}_PreSelected.csv')
+    results_csv = os.path.join(args.output_dir, f'MOPEDDS_{DATASET}_PreSelected.csv')
     csv_header_written = os.path.exists(results_csv) and os.path.getsize(results_csv) > 0
     csv_fieldnames = None
     if csv_header_written:
@@ -560,7 +560,7 @@ def main():
 
     sampler = TPESampler(seed=SEED)
     study = optuna.create_study(
-        study_name=f'ewdd_preselected_{DATASET}',
+        study_name=f'mopedds_preselected_{DATASET}',
         directions=['maximize', 'minimize'],
         sampler=sampler,
     )
@@ -571,7 +571,7 @@ def main():
     remaining_trials = max(0, args.n_trials - n_existing)
 
     print("=" * 80)
-    print("EWDD Pre-Selected Ensemble Optimization")
+    print("MOPEDDS Pre-Selected Ensemble Optimization")
     print("=" * 80)
     print(f"Dataset: {DATASET}")
     print(f"Classifier: {CLASSIFIER}")
@@ -665,7 +665,7 @@ def main():
     # Write config for best-accuracy Pareto trial
     if pareto_trials:
         best_trial = max(pareto_trials, key=lambda t: t.values[0])
-        config_path = os.path.join(args.output_dir, f'EWDD_{DATASET}_PreSelected.config')
+        config_path = os.path.join(args.output_dir, f'MOPEDDS_{DATASET}_PreSelected.config')
         write_best_config(best_trial, candidates, config_path)
 
         print(f"\nBest config written to: {config_path}")
@@ -677,7 +677,7 @@ def main():
         fastest_trial = min(pareto_trials, key=lambda t: t.values[1])
         if fastest_trial.number != best_trial.number:
             fast_config_path = os.path.join(args.output_dir,
-                                            f'EWDD_{DATASET}_PreSelected_Fast.config')
+                                            f'MOPEDDS_{DATASET}_PreSelected_Fast.config')
             write_best_config(fastest_trial, candidates, fast_config_path)
             print(f"\nFastest config written to: {fast_config_path}")
             print(f"  Accuracy: {fastest_trial.values[0]:.4f}")

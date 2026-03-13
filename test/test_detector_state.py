@@ -15,12 +15,12 @@ base_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base_module)
 UnsupervisedDriftDetector = base_module.UnsupervisedDriftDetector
 
-spec = importlib.util.spec_from_file_location("ewdd", "detectors/ewdd.py")
-ewdd_module = importlib.util.module_from_spec(spec)
-sys.modules['detectors.base'] = base_module  # Make base available for ewdd
-spec.loader.exec_module(ewdd_module)
-ThreadsDeployment = ewdd_module.ThreadsDeployment
-MultiprocessingDeployment = ewdd_module.MultiprocessingDeployment
+spec = importlib.util.spec_from_file_location("mopedds", "detectors/mopedds.py")
+mopedds_module = importlib.util.module_from_spec(spec)
+sys.modules['detectors.base'] = base_module  # Make base available for mopedds
+spec.loader.exec_module(mopedds_module)
+ThreadsDeployment = mopedds_module.ThreadsDeployment
+MultiprocessingDeployment = mopedds_module.MultiprocessingDeployment
 
 
 class TestDetector(UnsupervisedDriftDetector):

@@ -3,7 +3,7 @@
 Cross-dataset hyperparameter optimization for drift detectors.
 
 Leave-one-out strategy across 5 datasets:
-  For each detector (BNDM, CSDDM, D3, IBDD, OCDD, SPLL, UDetect, EWDD):
+  For each detector (BNDM, CSDDM, D3, IBDD, OCDD, SPLL, UDetect, MOPEDDS):
   - 5 folds: optimize on 4 train datasets (1000 trials), evaluate 10 Pareto
     configs on 1 holdout dataset
   - Objective: maximize avg accuracy, minimize avg normalized runtime
@@ -49,7 +49,7 @@ from detectors.ibdd import IBDD
 from detectors.ocdd import OCDD
 from detectors.spll import SPLL
 from detectors.udetect import UDetect
-from detectors.ewdd import EWDD
+from detectors.mopedds import MOPEDDS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -144,8 +144,8 @@ def make_detector(detector_name, params):
         raise ValueError(f"Unknown detector: {detector_name}")
 
 
-def make_ewdd(params):
-    """Construct an EWDD instance from a params dict."""
+def make_mopedds(params):
+    """Construct an MOPEDDS instance from a params dict."""
     config = {
         'detector_decision_criteria': params['detector_decision_criteria'],
         'ensemble_decision_criteria': params['ensemble_decision_criteria'],
@@ -183,7 +183,7 @@ def make_ewdd(params):
     with os.fdopen(fd, 'w') as f:
         yaml.dump(config, f)
 
-    detector = EWDD(seed=SEED, recent_samples_size=params['recent_samples_size'],
+    detector = MOPEDDS(seed=SEED, recent_samples_size=params['recent_samples_size'],
                     config_path=config_path)
     return detector, config_path
 
@@ -224,7 +224,7 @@ def get_param_distributions(detector_name):
         dists['n_windows'] = IntDistribution(5, 30)
         dists['n_samples'] = IntDistribution(20, 200)
         dists['disjoint_training_windows'] = CategoricalDistribution([True, False])
-    elif detector_name == 'EWDD':
+    elif detector_name == 'MOPEDDS':
         dists.update({
             'detector_decision_criteria': CategoricalDistribution(['any', 'majority', 'all']),
             'ensemble_decision_criteria': CategoricalDistribution(['any', 'majority', 'all']),
@@ -400,8 +400,8 @@ def suggest_single_dd_params(trial, detector_name):
     return params
 
 
-def suggest_ewdd_params(trial):
-    """Suggest hyperparameters for EWDD."""
+def suggest_mopedds_params(trial):
+    """Suggest hyperparameters for MOPEDDS."""
     params = {
         'recent_samples_size': trial.suggest_int('recent_samples_size', 50, 5000),
         'detector_decision_criteria': trial.suggest_categorical(
@@ -450,8 +450,8 @@ def evaluate_on_datasets(detector_name, params, dataset_names, tmp_dir):
 
     for ds in dataset_names:
         try:
-            if detector_name == 'EWDD':
-                detector, config_path = make_ewdd(params)
+            if detector_name == 'MOPEDDS':
+                detector, config_path = make_mopedds(params)
             else:
                 detector = make_detector(detector_name, params)
                 config_path = None
@@ -478,8 +478,8 @@ def make_objective(detector_name, train_datasets, tmp_dir):
     """Create an Optuna objective that evaluates across train_datasets."""
 
     def objective(trial):
-        if detector_name == 'EWDD':
-            params = suggest_ewdd_params(trial)
+        if detector_name == 'MOPEDDS':
+            params = suggest_mopedds_params(trial)
         else:
             params = suggest_single_dd_params(trial, detector_name)
 
@@ -670,8 +670,8 @@ def run_for_detector(detector_name, n_trials, output_dir, fold_idx=None):
 
             for ds in test_datasets:
                 try:
-                    if detector_name == 'EWDD':
-                        det, cfg_path = make_ewdd(params)
+                    if detector_name == 'MOPEDDS':
+                        det, cfg_path = make_mopedds(params)
                     else:
                         det = make_detector(detector_name, params)
                         cfg_path = None
@@ -723,7 +723,7 @@ def run_for_detector(detector_name, n_trials, output_dir, fold_idx=None):
 def main():
     parser = ArgumentParser(description='Cross-dataset hyperparameter optimization for drift detectors.')
     parser.add_argument('--detector', type=str, required=True,
-                        choices=['BNDM', 'CSDDM', 'D3', 'IBDD', 'OCDD', 'SPLL', 'UDetect', 'EWDD'],
+                        choices=['BNDM', 'CSDDM', 'D3', 'IBDD', 'OCDD', 'SPLL', 'UDetect', 'MOPEDDS'],
                         help='Which detector to optimize')
     parser.add_argument('--n_trials', type=int, default=1000,
                         help='Number of Optuna trials per fold (default: 1000)')

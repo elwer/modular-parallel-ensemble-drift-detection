@@ -2,7 +2,7 @@
 # Submit one SLURM job per (detector, source_dataset, eval_dataset) triplet.
 # ForestCovertype is excluded as an evaluation target.
 
-DETECTORS=("BNDM" "CSDDM" "D3" "IBDD" "OCDD" "SPLL" "UDetect" "EWDD")
+DETECTORS=("BNDM" "CSDDM" "D3" "IBDD" "OCDD" "SPLL" "UDetect" "MOPEDDS")
 SOURCE_DATASETS=("Electricity" "GasSensor" "PokerHand" "RialtoBridgeTimelapse")
 EVAL_DATASETS=("Electricity" "GasSensor" "PokerHand" "RialtoBridgeTimelapse")
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=DD_EWDD
+#SBATCH --job-name=DD_MOPEDDS_PreSel
 #SBATCH --cpu-freq=2000000
 #SBATCH --cpus-per-task=16
 #SBATCH --ntasks=1
@@ -10,4 +10,4 @@
 
 cd /data/quokka/ws/9/s4122485-parallelDD/parallel-unsupervised-concept-drift-detection
 source setup.sh
-python optimization/ewdd_optimize_optuna.py --n_trials "${N_TRIALS}" --dataset "${DATASET}"
+python optimization/mopedds_preselected_optimize.py --n_trials "${N_TRIALS}" --dataset "${DATASET}"

@@ -11,7 +11,7 @@ The following unsupervised drift detectors are supported:
 - **OCDD** — One-Class Drift Detector
 - **SPLL** — Semi-Parametric Log-Likelihood
 - **UDetect** — Unsupervised Change Detection for Activity Recognition
-- **EWDD** — Ensemble Window-based Drift Detection (ensemble of the above)
+- **MOPEDDS** — Ensemble Window-based Drift Detection (ensemble of the above)
 
 ## Hyperparameter Optimization
 
@@ -19,7 +19,7 @@ Optimization uses [Optuna](https://optuna.org/) with a TPE sampler.
 
 ### Submit all optimization jobs (SLURM)
 
-The `submit_dds_optimization.sh` script submits one SLURM job per single detector plus one for the EWDD ensemble (8 jobs total):
+The `submit_dds_optimization.sh` script submits one SLURM job per single detector plus one for the MOPEDDS ensemble (8 jobs total):
 
 ```bash
 bash submit_dds_optimization.sh
@@ -41,10 +41,10 @@ sbatch --job-name="DD_CSDDM" \
        optimize_single_dd.sbatch
 ```
 
-EWDD ensemble:
+MOPEDDS ensemble:
 
 ```bash
-sbatch --export=ALL,N_TRIALS="1000" optimize_ewdd.sbatch
+sbatch --export=ALL,N_TRIALS="1000" optimize_mopedds.sbatch
 ```
 
 ### Run optimization locally (without SLURM)
@@ -55,10 +55,10 @@ Single detector (one or more):
 python optimization/single_dd_optimize_optuna.py --n_trials 100 --detectors CSDDM D3
 ```
 
-EWDD ensemble:
+MOPEDDS ensemble:
 
 ```bash
-python optimization/ewdd_optimize_optuna.py --n_trials 100
+python optimization/mopedds_optimize_optuna.py --n_trials 100
 ```
 
 ## Testing Configurations
@@ -86,11 +86,11 @@ python run_config_detectors.py <Dataset> <ConfigPath> <RecentSamplesSize> <Train
 ### Example
 
 ```bash
-python run_config_detectors.py Electricity detectors/ewdd/configs/ewdd.config 500 1600 True True False
+python run_config_detectors.py Electricity detectors/mopedds/configs/mopedds.config 500 1600 True True False
 ```
 
 ### Submit as a SLURM job
 
 ```bash
-sbatch run_single_dds_with_ewdd_config.sbatch
+sbatch run_single_dds_with_mopedds_config.sbatch
 ```

@@ -17,8 +17,8 @@ Arguments:
     ReqLabels         - Boolean flag (True/False/1/0) to output requested labels metric
 
 Examples:
-    python run_config_detectors.py Electricity detectors/ewdd/configs/ewdd.config 500 1600 True True False
-    python run_config_detectors.py SineClustersPre detectors/ewdd/configs/ewdd.config 1000 1600 True False True
+    python run_config_detectors.py Electricity detectors/mopedds/configs/mopedds.config 500 1600 True True False
+    python run_config_detectors.py SineClustersPre detectors/mopedds/configs/mopedds.config 1000 1600 True False True
 """
 
 import os

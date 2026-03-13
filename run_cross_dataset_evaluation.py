@@ -46,7 +46,7 @@ from detectors.ibdd import IBDD
 from detectors.ocdd import OCDD
 from detectors.spll import SPLL
 from detectors.udetect import UDetect
-from detectors.ewdd import EWDD
+from detectors.mopedds import MOPEDDS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ SOURCE_DATASETS = ['Electricity', 'GasSensor', 'PokerHand', 'RialtoBridgeTimelap
 EVAL_DATASETS = ['Electricity', 'GasSensor', 'PokerHand', 'RialtoBridgeTimelapse']
 
 SINGLE_DETECTORS = ['BNDM', 'CSDDM', 'D3', 'IBDD', 'OCDD', 'SPLL', 'UDetect']
-ALL_DETECTORS = SINGLE_DETECTORS + ['EWDD']
+ALL_DETECTORS = SINGLE_DETECTORS + ['MOPEDDS']
 
 
 def _timeout_handler(signum, frame):
@@ -114,8 +114,8 @@ def make_detector(detector_name, params):
         raise ValueError(f"Unknown detector: {detector_name}")
 
 
-def make_ewdd(params):
-    """Construct an EWDD instance from a params dict. Returns (detector, config_path)."""
+def make_mopedds(params):
+    """Construct an MOPEDDS instance from a params dict. Returns (detector, config_path)."""
     dtw = params.get('udetect_disjoint_training_windows', True)
     if isinstance(dtw, str):
         dtw = dtw.strip().lower() in ('true', '1')
@@ -163,7 +163,7 @@ def make_ewdd(params):
     with os.fdopen(fd, 'w') as f:
         yaml.dump(config, f)
 
-    detector = EWDD(seed=SEED,
+    detector = MOPEDDS(seed=SEED,
                     recent_samples_size=int(params['recent_samples_size']),
                     config_path=config_path)
     return detector, config_path
@@ -343,8 +343,8 @@ def main():
             logger.info(f"  {detector_name} pareto#{pareto_idx} on {eval_dataset}")
 
             try:
-                if detector_name == 'EWDD':
-                    det, cfg_path = make_ewdd(params)
+                if detector_name == 'MOPEDDS':
+                    det, cfg_path = make_mopedds(params)
                 else:
                     det = make_detector(detector_name, params)
                     cfg_path = None

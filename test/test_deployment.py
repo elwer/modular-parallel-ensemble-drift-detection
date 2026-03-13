@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import only what we need to avoid dependency issues
-from detectors.ewdd import ThreadsDeployment, MultiprocessingDeployment
+from detectors.mopedds import ThreadsDeployment, MultiprocessingDeployment
 from detectors.base import UnsupervisedDriftDetector
 
 

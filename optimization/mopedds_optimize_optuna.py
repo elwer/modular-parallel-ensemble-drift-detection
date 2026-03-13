@@ -1,7 +1,7 @@
 """
-EWDD Hyperparameter Optimization using Optuna.
+MOPEDDS Hyperparameter Optimization using Optuna.
 
-This script defines the search space for all EWDD parameters and launches
+This script defines the search space for all MOPEDDS parameters and launches
 the optimization process using Optuna with TPE sampler.
 
 Detectors: BNDM, CSDDM, D3, IBDD, OCDD, SPLL, UDetect
@@ -33,7 +33,7 @@ warnings.filterwarnings('ignore', message=r'p-value', category=UserWarning)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import datasets
-from detectors.ewdd import EWDD
+from detectors.mopedds import MOPEDDS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,8 +50,8 @@ def _timeout_handler(signum, frame):
     raise TimeoutError("Trial exceeded 60-minute time limit")
 
 
-def create_ewdd_config(params: dict) -> str:
-    """Create a temporary EWDD config file from hyperparameters."""
+def create_mopedds_config(params: dict) -> str:
+    """Create a temporary MOPEDDS config file from hyperparameters."""
     config = {
         'detector_decision_criteria': params['detector_decision_criteria'],
         'ensemble_decision_criteria': params['ensemble_decision_criteria'],
@@ -129,14 +129,14 @@ def create_ewdd_config(params: dict) -> str:
 
 
 def objective(trial: optuna.Trial):
-    """Optuna objective function for EWDD optimization. Returns (accuracy, runtime)."""
+    """Optuna objective function for MOPEDDS optimization. Returns (accuracy, runtime)."""
     
     # Sample recent_samples_size (shared across all detectors)
     recent_samples_size = trial.suggest_int('recent_samples_size', 50, 5000)
     
     # Sample hyperparameters
     params = {
-        # EWDD ensemble parameters
+        # MOPEDDS ensemble parameters
         'detector_decision_criteria': trial.suggest_categorical(
             'detector_decision_criteria', ['any', 'majority', 'all']),
         'ensemble_decision_criteria': trial.suggest_categorical(
@@ -185,7 +185,7 @@ def objective(trial: optuna.Trial):
     }
     
     # Create config file
-    config_path = create_ewdd_config(params)
+    config_path = create_mopedds_config(params)
     
     try:
         signal.signal(signal.SIGALRM, _timeout_handler)
@@ -196,8 +196,8 @@ def objective(trial: optuna.Trial):
         dataset = dataset_class(directory_path='/tmp')
         stream = iter(dataset)
         
-        # Create EWDD detector
-        detector = EWDD(
+        # Create MOPEDDS detector
+        detector = MOPEDDS(
             seed=SEED,
             recent_samples_size=recent_samples_size,
             config_path=config_path
@@ -245,8 +245,8 @@ def objective(trial: optuna.Trial):
 
 # ── Parameter distributions (for reconstructing trials from CSV) ─────────────
 
-def get_ewdd_param_distributions():
-    """Return a dict of Optuna distributions for EWDD parameters."""
+def get_mopedds_param_distributions():
+    """Return a dict of Optuna distributions for MOPEDDS parameters."""
     return {
         'recent_samples_size': IntDistribution(50, 5000),
         'detector_decision_criteria': CategoricalDistribution(['any', 'majority', 'all']),
@@ -326,7 +326,7 @@ def _param_in_distribution(value, dist):
 
 
 def load_existing_trials(csv_path, study):
-    """Load completed EWDD trials from an existing CSV into the Optuna study.
+    """Load completed MOPEDDS trials from an existing CSV into the Optuna study.
 
     Returns (n_loaded, n_successful) where n_successful counts trials with
     finite runtime (i.e. not 'inf').
@@ -334,7 +334,7 @@ def load_existing_trials(csv_path, study):
     if not os.path.exists(csv_path):
         return 0, 0
 
-    dists = get_ewdd_param_distributions()
+    dists = get_mopedds_param_distributions()
     meta_columns = {'dataset', 'trial_id', 'accuracy', 'runtime', 'drifts'}
     n_loaded = 0
     n_successful = 0
@@ -390,10 +390,10 @@ def main():
                         help='Target number of successful (non-inf runtime) runs')
     parser.add_argument('--n_jobs', type=int, default=1,
                         help='Number of parallel jobs (-1 for all CPUs)')
-    parser.add_argument('--study_name', type=str, default='ewdd_optimization',
+    parser.add_argument('--study_name', type=str, default='mopedds_optimization',
                         help='Name of the Optuna study')
     parser.add_argument('--storage', type=str, default=None,
-                        help='Database URL for distributed optimization (e.g., sqlite:///ewdd.db)')
+                        help='Database URL for distributed optimization (e.g., sqlite:///mopedds.db)')
     parser.add_argument('--timeout', type=int, default=None,
                         help='Timeout in seconds for the entire optimization')
     parser.add_argument('--dataset', type=str, default='Electricity',
@@ -415,7 +415,7 @@ def main():
     logger.info(f"Copied {src_path} -> {tmp_path}")
     
     os.makedirs(args.output_dir, exist_ok=True)
-    results_csv = os.path.join(args.output_dir, f'EWDD_{DATASET}.csv')
+    results_csv = os.path.join(args.output_dir, f'MOPEDDS_{DATASET}.csv')
     csv_header_written = os.path.exists(results_csv) and os.path.getsize(results_csv) > 0
     # Read existing header so appended rows use the same column order
     csv_fieldnames = None
@@ -450,7 +450,7 @@ def main():
           f"({n_existing} total trials) <<<\n")
     
     print("=" * 80)
-    print("EWDD Hyperparameter Optimization using Optuna")
+    print("MOPEDDS Hyperparameter Optimization using Optuna")
     print("=" * 80)
     print(f"Study name: {args.study_name}")
     print(f"Target successful runs: {args.n_trials}")
@@ -520,10 +520,10 @@ def main():
                 show_progress_bar=False,
                 callbacks=[trial_callback],
             )
-            logger.info(f"EWDD: {n_existing_successful + _n_new_successful}/{args.n_trials} "
+            logger.info(f"MOPEDDS: {n_existing_successful + _n_new_successful}/{args.n_trials} "
                         f"successful runs ({n_existing + _n_new_trials} total trials)")
         
-        logger.info(f"EWDD: Finished — {_n_new_successful} new successful runs "
+        logger.info(f"MOPEDDS: Finished — {_n_new_successful} new successful runs "
                     f"out of {_n_new_trials} total new trials")
         logger.info(f"Wrote {n_rows_written} new rows to {results_csv}")
     
@@ -540,7 +540,7 @@ def main():
     best_trial = max(pareto_trials, key=lambda t: t.values[0])
     best = best_trial.params
     print("\n" + "=" * 80)
-    print(f"Best accuracy configuration as ewdd.config YAML (Trial {best_trial.number}: accuracy={best_trial.values[0]:.4f}, runtime={best_trial.values[1]:.1f}s):")
+    print(f"Best accuracy configuration as mopedds.config YAML (Trial {best_trial.number}: accuracy={best_trial.values[0]:.4f}, runtime={best_trial.values[1]:.1f}s):")
     print("=" * 80)
     print(f"""
 # recent_samples_size: {best.get('recent_samples_size', 2424)}
@@ -596,7 +596,7 @@ detectors:
     if fastest_trial.number != best_trial.number:
         best_f = fastest_trial.params
         print("\n" + "=" * 80)
-        print(f"Fastest configuration as ewdd.config YAML (Trial {fastest_trial.number}: accuracy={fastest_trial.values[0]:.4f}, runtime={fastest_trial.values[1]:.1f}s):")
+        print(f"Fastest configuration as mopedds.config YAML (Trial {fastest_trial.number}: accuracy={fastest_trial.values[0]:.4f}, runtime={fastest_trial.values[1]:.1f}s):")
         print("=" * 80)
         print(f"""
 # recent_samples_size: {best_f.get('recent_samples_size', 2424)}

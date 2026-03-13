@@ -53,10 +53,10 @@ def parse_slurm_out(filepath):
     if m:
         config['detector'] = m.group(1)
     else:
-        # For EWDD runs
-        m = re.search(r'EWDD Hyperparameter Optimization', raw)
+        # For MOPEDDS runs
+        m = re.search(r'MOPEDDS Hyperparameter Optimization', raw)
         if m:
-            config['detector'] = 'EWDD'
+            config['detector'] = 'MOPEDDS'
 
     # Also try to get detector from the INFO lines if not found yet
     if 'detector' not in config:
@@ -67,7 +67,7 @@ def parse_slurm_out(filepath):
     # ── 2. Extract trial data ─────────────────────────────────────────────
     # Two sources per trial:
     #   a) INFO line:  INFO:__main__:IBDD Trial 0: accuracy=0.9215, runtime=1634.8s, drifts=8589
-    #      or EWDD:    INFO:__main__:Trial 0: accuracy=0.9215, runtime=1634.8s, drifts=8589
+    #      or MOPEDDS:    INFO:__main__:Trial 0: accuracy=0.9215, runtime=1634.8s, drifts=8589
     #   b) Optuna line: Trial 0 finished with values: [0.921, 1634.77] and parameters: {'k': v, ...}
 
     # Parse INFO lines for trial_id -> (accuracy, runtime, drifts)

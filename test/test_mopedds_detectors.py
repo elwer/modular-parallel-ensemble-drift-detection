@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Test script that runs each drift detector defined in ewdd.config separately
+Test script that runs each drift detector defined in mopedds.config separately
 and prints the accuracy and runtime for each.
 
 Usage:
-    python test_ewdd_detectors.py <recent_samples_size>
+    python test_mopedds_detectors.py <recent_samples_size>
     
 Example:
-    python test_ewdd_detectors.py 2424
+    python test_mopedds_detectors.py 2424
 """
 import argparse
 
@@ -17,15 +17,15 @@ import subprocess
 import re
 from pathlib import Path
 
-# Use the same yaml import as ewdd.py
+# Use the same yaml import as mopedds.py
 try:
     import yaml
 except ImportError:
     # Fallback: parse YAML manually for simple configs
     yaml = None
 
-# Path to ewdd config
-CONFIG_PATH = Path(__file__).parent / "detectors" / "ewdd" / "configs" / "ewdd.config"
+# Path to mopedds config
+CONFIG_PATH = Path(__file__).parent / "detectors" / "mopedds" / "configs" / "mopedds.config"
 
 
 def get_base_cmd(recent_samples_size: int) -> list:
@@ -40,7 +40,7 @@ def get_base_cmd(recent_samples_size: int) -> list:
 
 
 def load_detectors_from_config(config_path: str) -> list:
-    """Load detector configurations from ewdd.config."""
+    """Load detector configurations from mopedds.config."""
     with open(config_path, 'r') as f:
         content = f.read()
     
@@ -192,14 +192,14 @@ def run_detector(detector_config: dict, recent_samples_size: int) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Test each drift detector from ewdd.config separately')
+    parser = argparse.ArgumentParser(description='Test each drift detector from mopedds.config separately')
     parser.add_argument('recent_samples_size', type=int, help='Recent samples size parameter for detectors')
     args = parser.parse_args()
     
     recent_samples_size = args.recent_samples_size
     
     print("=" * 60)
-    print("EWDD Detector Individual Test")
+    print("MOPEDDS Detector Individual Test")
     print("=" * 60)
     print(f"Config: {CONFIG_PATH}")
     print(f"Dataset: Electricity")

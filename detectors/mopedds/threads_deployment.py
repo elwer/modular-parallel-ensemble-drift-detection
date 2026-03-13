@@ -1,5 +1,5 @@
 """
-Optimized thread-based deployment for EWDD.
+Optimized thread-based deployment for MOPEDDS.
 
 Design goals:
 - Minimal main thread overhead
@@ -152,12 +152,12 @@ class ThreadsDeployment:
     
     def __init__(self, detectors: List[UnsupervisedDriftDetector],
                  verbose: bool = False,
-                 ewdd=None,
+                 mopedds=None,
                  detector_decision_criteria: str = "majority",
                  decision_window: int = 10):
         self.detectors = detectors
         self.verbose = verbose
-        self.ewdd = ewdd  # Reference to EWDD for suppression flag
+        self.mopedds = mopedds  # Reference to MOPEDDS for suppression flag
         self.detector_decision_criteria = detector_decision_criteria
         self.decision_window = decision_window
         
@@ -193,7 +193,7 @@ class ThreadsDeployment:
             self.workers.append(worker)
         
         self._initialized = True
-        logger.info(f"EWDD initialized with {num_detectors} workers (level1={self.detector_decision_criteria}, window={self.decision_window})")
+        logger.info(f"MOPEDDS initialized with {num_detectors} workers (level1={self.detector_decision_criteria}, window={self.decision_window})")
 
     def clear_all_histories(self):
         """Signal all workers to clear their decision histories."""
@@ -227,9 +227,9 @@ class ThreadsDeployment:
         if not self._initialized:
             self.initialize()
         
-        # Use EWDD's sample counter for consistency
-        sample_id = self.ewdd.sample_counter if self.ewdd else self.sample_counter + 1
-        if not self.ewdd:
+        # Use MOPEDDS's sample counter for consistency
+        sample_id = self.mopedds.sample_counter if self.mopedds else self.sample_counter + 1
+        if not self.mopedds:
             self.sample_counter += 1
         
         # Write data to all slots and signal workers
@@ -239,7 +239,7 @@ class ThreadsDeployment:
             slot.sample_id = sample_id  # This signals the worker
         
         # If in suppression, return immediately (workers still process but don't write results)
-        if self.ewdd and self.ewdd.in_suppression:
+        if self.mopedds and self.mopedds.in_suppression:
             return None
         
         # Wait for all results

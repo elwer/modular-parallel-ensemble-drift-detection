@@ -3,7 +3,7 @@ Single Drift Detector Hyperparameter Optimization using Optuna.
 
 This script optimizes each individual drift detector (BNDM, CSDDM, D3, IBDD,
 OCDD, SPLL, UDetect) separately using the same number of trials, allowing
-comparison with EWDD.
+comparison with MOPEDDS.
 """
 
 import os

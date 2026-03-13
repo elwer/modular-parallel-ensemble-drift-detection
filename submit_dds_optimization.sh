@@ -19,11 +19,11 @@ for DATASET in "${DATASETS[@]}"; do
                "${SBATCH_TEMPLATE}"
     done
 
-    # Submit EWDD ensemble optimization
-    echo "  Submitting job for EWDD on ${DATASET} (target: ${N_SUCCESSFUL} successful runs)..."
-    sbatch --job-name="DD_EWDD_${DATASET}" \
+    # Submit MOPEDDS ensemble optimization
+    echo "  Submitting job for MOPEDDS on ${DATASET} (target: ${N_SUCCESSFUL} successful runs)..."
+    sbatch --job-name="DD_MOPEDDS_${DATASET}" \
            --export=ALL,N_TRIALS="${N_SUCCESSFUL}",DATASET="${DATASET}" \
-           "${SCRIPT_DIR}/optimize_ewdd.sbatch"
+           "${SCRIPT_DIR}/optimize_mopedds.sbatch"
 done
 
 echo "All jobs submitted."

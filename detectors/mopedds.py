@@ -1,16 +1,16 @@
 """
-Backward compatibility module for EWDD.
+Backward compatibility module for MOPEDDS.
 
-The EWDD implementation has been moved to a package structure at detectors/ewdd/.
+The MOPEDDS implementation has been moved to a package structure at detectors/mopedds/.
 This module provides backward compatibility by re-exporting the main classes.
 
 For new code, prefer importing directly from the package:
-    from detectors.ewdd import EWDD, ThreadsDeployment, MultiprocessingDeployment
+    from detectors.mopedds import MOPEDDS, ThreadsDeployment, MultiprocessingDeployment
 """
 
 # Re-export main classes for backward compatibility
-from .ewdd import (
-    EWDD,
+from .mopedds import (
+    MOPEDDS,
     DriftDetectorDeployment,
     ThreadsDeployment,
     MultiprocessingDeployment,
@@ -23,7 +23,7 @@ from .ewdd import (
 )
 
 __all__ = [
-    'EWDD',
+    'MOPEDDS',
     'DriftDetectorDeployment',
     'ThreadsDeployment',
     'MultiprocessingDeployment',

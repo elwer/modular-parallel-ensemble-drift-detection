@@ -1,5 +1,5 @@
 """
-EWDD - Optimized Ensemble Wrapper Drift Detector.
+MOPEDDS - Optimized Ensemble Wrapper Drift Detector.
 
 Redesigned for minimal runtime overhead.
 """
@@ -19,13 +19,13 @@ try:
     from metrics.computational_metrics import computational_metrics
 except ImportError:
     from detectors.base import UnsupervisedDriftDetector
-    from detectors.ewdd.threads_deployment import ThreadsDeployment
+    from detectors.mopedds.threads_deployment import ThreadsDeployment
     from metrics.computational_metrics import computational_metrics
 
 logger = logging.getLogger(__name__)
 
 
-class EWDD(UnsupervisedDriftDetector):
+class MOPEDDS(UnsupervisedDriftDetector):
     """
     Optimized Ensemble Wrapper Drift Detector.
     """
@@ -58,7 +58,7 @@ class EWDD(UnsupervisedDriftDetector):
         if config_path:
             self._load_config()
 
-    @scorep.user.region("EWDD._load_config")
+    @scorep.user.region("MOPEDDS._load_config")
     def _load_config(self):
         if not os.path.exists(self.config_path):
             raise FileNotFoundError(f"Config not found: {self.config_path}")
@@ -82,9 +82,9 @@ class EWDD(UnsupervisedDriftDetector):
             params = detector_config.get('params', {})
             self._init_detector(detector_class, **params)
         
-        logger.info(f"EWDD loaded {len(self.detectors)} detectors")
+        logger.info(f"MOPEDDS loaded {len(self.detectors)} detectors")
 
-    @scorep.user.region("EWDD._init_detector")
+    @scorep.user.region("MOPEDDS._init_detector")
     def _init_detector(self, detector_class: str, **kwargs):
         try:
             module_path, class_name = detector_class.rsplit('.', 1)
@@ -100,12 +100,12 @@ class EWDD(UnsupervisedDriftDetector):
         except Exception as e:
             logger.error(f"Failed to init {detector_class}: {e}")
 
-    @scorep.user.region("EWDD.deploy")
+    @scorep.user.region("MOPEDDS.deploy")
     def deploy(self):
         # Use suppression_window if set, otherwise fall back to decision_window
         effective_suppression = self.suppression_window if self.suppression_window is not None else self.decision_window
         
-        print(f"\n=== EWDD Deployment ===")
+        print(f"\n=== MOPEDDS Deployment ===")
         print(f"Ensemble decision criteria: {self.ensemble_decision_criteria}")
         print(f"Detector decision criteria: {self.detector_decision_criteria}")
         print(f"Decision window: {self.decision_window}")
@@ -122,20 +122,20 @@ class EWDD(UnsupervisedDriftDetector):
         self.deployment = ThreadsDeployment(
             self.detectors,
             self.verbose,
-            self,  # Pass reference to EWDD for suppression flag
+            self,  # Pass reference to MOPEDDS for suppression flag
             detector_decision_criteria=self.detector_decision_criteria,
             decision_window=self.decision_window
         )
         self.deployment.initialize()
         return self.deployment
 
-    @scorep.user.region("EWDD.shutdown")
+    @scorep.user.region("MOPEDDS.shutdown")
     def shutdown(self):
         if self.deployment:
             self.deployment.shutdown()
             self.deployment = None
 
-    @scorep.user.region("EWDD.update")
+    @scorep.user.region("MOPEDDS.update")
     def update(self, data: dict) -> bool:
         if not self.deployment:
             self.deploy()
@@ -151,7 +151,7 @@ class EWDD(UnsupervisedDriftDetector):
                 scorep.user.parameter_int("in_suppression", samples_since)
                 self.in_suppression = True
                 if self.verbose:
-                    print(f"  [EWDD] Sample {sample_id}: IN SUPPRESSION (samples_since={samples_since}, window={effective_suppression})")
+                    print(f"  [MOPEDDS] Sample {sample_id}: IN SUPPRESSION (samples_since={samples_since}, window={effective_suppression})")
             else:
                 scorep.user.parameter_int("in_suppression", samples_since)
                 self.in_suppression = False
@@ -164,7 +164,7 @@ class EWDD(UnsupervisedDriftDetector):
         if self.in_suppression:
             # Debug: show when suppression blocks drift reporting (results may be None during suppression)
             if self.verbose:
-                print(f"  [EWDD] Sample {sample_id}: SUPPRESSED (drift_reported_at={self.drift_reported_at_sample}, results={results})")
+                print(f"  [MOPEDDS] Sample {sample_id}: SUPPRESSED (drift_reported_at={self.drift_reported_at_sample}, results={results})")
             return False
         
         # Apply level 2 decision criteria (results already contain level 1 decisions from workers)
@@ -172,7 +172,7 @@ class EWDD(UnsupervisedDriftDetector):
         
         # Debug: print when any DD reports drift
         if self.verbose and results and any(results):
-            print(f"  [EWDD] Sample {sample_id}: DD results={results}, ensemble decision={drift_decision}, in_suppression={self.in_suppression}")
+            print(f"  [MOPEDDS] Sample {sample_id}: DD results={results}, ensemble decision={drift_decision}, in_suppression={self.in_suppression}")
         
         # Mark suppression if drift detected (don't clear histories - DDs should continue normally)
         if drift_decision:
@@ -182,7 +182,7 @@ class EWDD(UnsupervisedDriftDetector):
         
         return drift_decision
     
-    @scorep.user.region("EWDD._apply_level2_decision")
+    @scorep.user.region("MOPEDDS._apply_level2_decision")
     def _apply_level2_decision(self, detector_decisions: list) -> bool:
         """Level 2 decision criteria.
         
@@ -210,7 +210,7 @@ class EWDD(UnsupervisedDriftDetector):
             return detectors_reporting_drift >= (num_detectors + 1) // 2
 
     @computational_metrics
-    @scorep.user.region("EWDD.process_main_stream")
+    @scorep.user.region("MOPEDDS.process_main_stream")
     def process_main_stream(self, stream, n_training_samples: int, classifier):
         """Override to only train on NEW samples since last retraining, avoiding duplicate training."""
         # Track the last sample index we trained on
@@ -230,8 +230,8 @@ class EWDD(UnsupervisedDriftDetector):
             self.predictions.append(classifier.predict(x))
             self.labels.append(y)
 
-            if self.update(x):  # Use EWDD's update method
-                with scorep.user.region("EWDD.update_classifier"):
+            if self.update(x):  # Use MOPEDDS's update method
+                with scorep.user.region("MOPEDDS.update_classifier"):
                     self.drifts.append(i)
                     
                     # Only train on samples AFTER last_trained_idx (avoid duplicates)
@@ -253,7 +253,7 @@ class EWDD(UnsupervisedDriftDetector):
         return (self.drifts, self.labels, self.predictions,
                 len(self.used_labels_set))
 
-    @scorep.user.region("EWDD.run_stream")
+    @scorep.user.region("MOPEDDS.run_stream")
     def run_stream(self, stream, n_training_samples: int, classifier_path):
         try:
             self.deploy()

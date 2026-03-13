@@ -2,7 +2,7 @@
 # Submit one SLURM job per detector per fold for cross-dataset optimization.
 # Leave-one-out: 8 detectors x 5 folds = 40 jobs.
 
-DETECTORS=("BNDM" "CSDDM" "D3" "IBDD" "OCDD" "SPLL" "UDetect" "EWDD")
+DETECTORS=("BNDM" "CSDDM" "D3" "IBDD" "OCDD" "SPLL" "UDetect" "MOPEDDS")
 N_TRIALS=${1:-1000}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
