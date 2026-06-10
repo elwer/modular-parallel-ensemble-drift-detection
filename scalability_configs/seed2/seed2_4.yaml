@@ -1,0 +1,28 @@
+seed: 2
+ensemble_size: 4
+detectors:
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 913
+    n_clusters: 9
+    threshold: 0.8419585329071025
+    recent_samples_size: 347
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 108
+    n_consecutive_deviations: 12
+    n_permutations: 730
+    update_interval: 90
+    recent_samples_size: 976
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 196
+    threshold: 0.3697710185573162
+    recent_samples_size: 302
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 207
+    feature_proportion: 0.5037879362430646
+    n_clusters: 26
+    confidence: 0.01
+    recent_samples_size: 424

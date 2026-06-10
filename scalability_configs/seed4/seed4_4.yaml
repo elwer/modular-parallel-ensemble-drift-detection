@@ -1,0 +1,29 @@
+seed: 4
+ensemble_size: 4
+detectors:
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 427
+    feature_proportion: 0.25180324417338784
+    n_clusters: 23
+    confidence: 0.1
+    recent_samples_size: 384
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4524
+    recent_samples_proportion: 0.27080042706578433
+    threshold: 0.29924692107101053
+    recent_samples_size: 341
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 8
+    n_samples: 155
+    disjoint_training_windows: false
+    recent_samples_size: 3403
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 383
+    feature_proportion: 0.9888916461187249
+    n_clusters: 17
+    confidence: 0.1
+    recent_samples_size: 2031

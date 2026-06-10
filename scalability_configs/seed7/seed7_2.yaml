@@ -1,0 +1,16 @@
+seed: 7
+ensemble_size: 2
+detectors:
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 56
+    feature_proportion: 0.536466457307221
+    n_clusters: 20
+    confidence: 0.1
+    recent_samples_size: 2202
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 14
+    n_samples: 21
+    disjoint_training_windows: true
+    recent_samples_size: 3482

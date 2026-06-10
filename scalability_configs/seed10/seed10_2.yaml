@@ -1,0 +1,16 @@
+seed: 10
+ensemble_size: 2
+detectors:
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 339
+    recent_samples_proportion: 0.4424060423022038
+    threshold: 0.4508626671756414
+    recent_samples_size: 581
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 75
+    feature_proportion: 0.41467416721186834
+    n_clusters: 6
+    confidence: 0.25
+    recent_samples_size: 3769

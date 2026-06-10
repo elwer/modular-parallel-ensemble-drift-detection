@@ -1,0 +1,16 @@
+seed: 5
+ensemble_size: 2
+detectors:
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 9
+    n_samples: 164
+    disjoint_training_windows: true
+    recent_samples_size: 3440
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 318
+    n_consecutive_deviations: 6
+    n_permutations: 544
+    update_interval: 57
+    recent_samples_size: 1272

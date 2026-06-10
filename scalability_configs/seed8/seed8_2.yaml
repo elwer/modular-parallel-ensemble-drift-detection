@@ -1,0 +1,14 @@
+seed: 8
+ensemble_size: 2
+detectors:
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 430
+    threshold: 0.33952878327038444
+    recent_samples_size: 2715
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 3048
+    recent_samples_proportion: 0.05132308222823525
+    threshold: 0.7685427576245044
+    recent_samples_size: 1770

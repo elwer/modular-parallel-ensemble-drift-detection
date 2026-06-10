@@ -1,0 +1,26 @@
+seed: 6
+ensemble_size: 4
+detectors:
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 374
+    n_clusters: 17
+    threshold: 3.315809017008849
+    recent_samples_size: 4080
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 9
+    n_samples: 116
+    disjoint_training_windows: false
+    recent_samples_size: 2554
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 25
+    n_samples: 139
+    disjoint_training_windows: false
+    recent_samples_size: 3052
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 387
+    threshold: 0.23042486292580408
+    recent_samples_size: 3130

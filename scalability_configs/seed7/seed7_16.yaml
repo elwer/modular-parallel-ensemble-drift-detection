@@ -1,0 +1,102 @@
+seed: 7
+ensemble_size: 16
+detectors:
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 56
+    feature_proportion: 0.536466457307221
+    n_clusters: 20
+    confidence: 0.1
+    recent_samples_size: 2202
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 14
+    n_samples: 21
+    disjoint_training_windows: true
+    recent_samples_size: 3482
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4429
+    recent_samples_proportion: 0.2161641078026264
+    threshold: 0.5530729789651135
+    recent_samples_size: 1078
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 403
+    threshold: 0.7873615593641485
+    recent_samples_size: 492
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 283
+    const: 9.005376799573726
+    threshold: 0.7239755925648582
+    max_depth: 9
+    recent_samples_size: 3264
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 507
+    n_clusters: 14
+    threshold: 2.0311880782792846
+    recent_samples_size: 3994
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1399
+    n_consecutive_deviations: 13
+    n_permutations: 163
+    update_interval: 34
+    recent_samples_size: 601
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 1760
+    recent_samples_proportion: 0.24828209074613772
+    threshold: 0.1879426440003732
+    recent_samples_size: 4971
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 76
+    threshold: 0.1819036781801777
+    recent_samples_size: 4693
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 409
+    n_consecutive_deviations: 18
+    n_permutations: 203
+    update_interval: 56
+    recent_samples_size: 258
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 7
+    n_samples: 73
+    disjoint_training_windows: false
+    recent_samples_size: 1266
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 2116
+    recent_samples_proportion: 0.4799606107646621
+    threshold: 0.5818233511696066
+    recent_samples_size: 3934
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 112
+    threshold: 0.19228281288705418
+    recent_samples_size: 4048
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 288
+    feature_proportion: 0.5323555941540836
+    n_clusters: 11
+    confidence: 0.25
+    recent_samples_size: 1230
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 204
+    n_clusters: 12
+    threshold: 3.7277209996976612
+    recent_samples_size: 3970
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 474
+    const: 6.951362011568562
+    threshold: 0.5130676151698572
+    max_depth: 4
+    recent_samples_size: 4377

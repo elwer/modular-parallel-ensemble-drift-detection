@@ -1,0 +1,28 @@
+seed: 9
+ensemble_size: 4
+detectors:
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1861
+    n_consecutive_deviations: 18
+    n_permutations: 478
+    update_interval: 27
+    recent_samples_size: 2428
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 10
+    n_samples: 197
+    disjoint_training_windows: false
+    recent_samples_size: 290
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 75
+    threshold: 0.851576906295174
+    recent_samples_size: 1465
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 184
+    const: 9.470540126604762
+    threshold: 0.888932878495826
+    max_depth: 10
+    recent_samples_size: 1265

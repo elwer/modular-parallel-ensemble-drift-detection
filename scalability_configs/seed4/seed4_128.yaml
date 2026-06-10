@@ -1,0 +1,810 @@
+seed: 4
+ensemble_size: 128
+detectors:
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 427
+    feature_proportion: 0.25180324417338784
+    n_clusters: 23
+    confidence: 0.1
+    recent_samples_size: 384
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4524
+    recent_samples_proportion: 0.27080042706578433
+    threshold: 0.29924692107101053
+    recent_samples_size: 341
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 8
+    n_samples: 155
+    disjoint_training_windows: false
+    recent_samples_size: 3403
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 383
+    feature_proportion: 0.9888916461187249
+    n_clusters: 17
+    confidence: 0.1
+    recent_samples_size: 2031
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 998
+    n_consecutive_deviations: 14
+    n_permutations: 603
+    update_interval: 14
+    recent_samples_size: 1844
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 531
+    n_clusters: 16
+    threshold: 1.3180712727638686
+    recent_samples_size: 3554
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 475
+    const: 2.235625802993321
+    threshold: 0.25016807336598845
+    max_depth: 1
+    recent_samples_size: 2133
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 179
+    threshold: 0.2939112992625066
+    recent_samples_size: 1754
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 445
+    const: 2.3915198753001805
+    threshold: 0.79576761282496
+    max_depth: 3
+    recent_samples_size: 2712
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 76
+    threshold: 0.8128203983785699
+    recent_samples_size: 2626
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 23
+    n_samples: 49
+    disjoint_training_windows: false
+    recent_samples_size: 381
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4099
+    recent_samples_proportion: 0.22436271042979417
+    threshold: 0.44408605224443254
+    recent_samples_size: 4738
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 134
+    const: 3.4322368862660695
+    threshold: 0.6255271999313179
+    max_depth: 6
+    recent_samples_size: 3490
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1181
+    n_consecutive_deviations: 7
+    n_permutations: 770
+    update_interval: 97
+    recent_samples_size: 2247
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 446
+    n_clusters: 14
+    threshold: 4.785767384114214
+    recent_samples_size: 659
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 489
+    const: 9.713773946261416
+    threshold: 0.869419053959018
+    max_depth: 4
+    recent_samples_size: 414
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 504
+    n_clusters: 6
+    threshold: 3.8574193428890506
+    recent_samples_size: 2257
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 391
+    feature_proportion: 0.8706816513421743
+    n_clusters: 29
+    confidence: 0.1
+    recent_samples_size: 3855
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 682
+    n_clusters: 17
+    threshold: 3.757823329256907
+    recent_samples_size: 3248
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 1840
+    recent_samples_proportion: 0.40910595805550265
+    threshold: 0.26895620180584184
+    recent_samples_size: 1334
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 126
+    n_consecutive_deviations: 20
+    n_permutations: 997
+    update_interval: 42
+    recent_samples_size: 999
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 252
+    threshold: 0.747897873936709
+    recent_samples_size: 3171
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 499
+    threshold: 0.2778683099186921
+    recent_samples_size: 487
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 1702
+    recent_samples_proportion: 0.12285566555087868
+    threshold: 0.5866223474183268
+    recent_samples_size: 4656
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 29
+    n_samples: 140
+    disjoint_training_windows: false
+    recent_samples_size: 266
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 7
+    n_samples: 28
+    disjoint_training_windows: true
+    recent_samples_size: 4054
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 337
+    feature_proportion: 0.8782478424255276
+    n_clusters: 21
+    confidence: 0.001
+    recent_samples_size: 1186
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 6
+    n_samples: 112
+    disjoint_training_windows: true
+    recent_samples_size: 4334
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 55
+    feature_proportion: 0.3672446031415467
+    n_clusters: 13
+    confidence: 0.001
+    recent_samples_size: 662
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 7
+    n_samples: 159
+    disjoint_training_windows: false
+    recent_samples_size: 3172
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 520
+    n_consecutive_deviations: 10
+    n_permutations: 497
+    update_interval: 39
+    recent_samples_size: 4036
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 3327
+    recent_samples_proportion: 0.09280385177386857
+    threshold: 0.19156089970919724
+    recent_samples_size: 3047
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 312
+    threshold: 0.8996684875127866
+    recent_samples_size: 3456
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 3689
+    recent_samples_proportion: 0.08011304201831382
+    threshold: 0.8050599511904468
+    recent_samples_size: 1654
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1404
+    n_consecutive_deviations: 10
+    n_permutations: 956
+    update_interval: 71
+    recent_samples_size: 3510
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 221
+    n_clusters: 19
+    threshold: 0.9201471434597254
+    recent_samples_size: 1383
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 140
+    threshold: 0.6653802105743107
+    recent_samples_size: 2725
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4098
+    recent_samples_proportion: 0.4369196284738422
+    threshold: 0.3068888636938514
+    recent_samples_size: 89
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1555
+    n_consecutive_deviations: 6
+    n_permutations: 105
+    update_interval: 92
+    recent_samples_size: 2604
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 223
+    n_clusters: 19
+    threshold: 0.6431095204046574
+    recent_samples_size: 4973
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 297
+    const: 5.310463958600721
+    threshold: 0.5165716722335886
+    max_depth: 7
+    recent_samples_size: 2453
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 465
+    n_clusters: 9
+    threshold: 3.856682658821534
+    recent_samples_size: 63
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1485
+    n_consecutive_deviations: 2
+    n_permutations: 724
+    update_interval: 50
+    recent_samples_size: 4507
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 289
+    feature_proportion: 0.8042078205963024
+    n_clusters: 20
+    confidence: 0.05
+    recent_samples_size: 4200
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 452
+    const: 4.463440710817985
+    threshold: 0.5939674999837011
+    max_depth: 7
+    recent_samples_size: 1202
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 178
+    const: 7.733317213588745
+    threshold: 0.38974364391503313
+    max_depth: 6
+    recent_samples_size: 1141
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 3600
+    recent_samples_proportion: 0.0871520502308708
+    threshold: 0.21515061661832027
+    recent_samples_size: 1505
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 196
+    feature_proportion: 0.9117219697354104
+    n_clusters: 13
+    confidence: 0.1
+    recent_samples_size: 4768
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 912
+    n_clusters: 13
+    threshold: 3.407336781487369
+    recent_samples_size: 815
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 7
+    n_samples: 123
+    disjoint_training_windows: true
+    recent_samples_size: 2750
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1439
+    n_consecutive_deviations: 12
+    n_permutations: 434
+    update_interval: 32
+    recent_samples_size: 2512
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 61
+    feature_proportion: 0.6433924057937412
+    n_clusters: 18
+    confidence: 0.001
+    recent_samples_size: 776
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 460
+    threshold: 0.38721551780253727
+    recent_samples_size: 856
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 10
+    n_samples: 66
+    disjoint_training_windows: false
+    recent_samples_size: 4751
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 178
+    n_clusters: 5
+    threshold: 0.942903187070971
+    recent_samples_size: 3975
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1483
+    n_consecutive_deviations: 8
+    n_permutations: 732
+    update_interval: 94
+    recent_samples_size: 2531
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 486
+    const: 9.285435650563368
+    threshold: 0.4248891286911869
+    max_depth: 10
+    recent_samples_size: 1995
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4062
+    recent_samples_proportion: 0.3666152685843689
+    threshold: 0.3477412543750835
+    recent_samples_size: 1937
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 431
+    threshold: 0.3612939628197349
+    recent_samples_size: 4389
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 281
+    feature_proportion: 0.9091160150063441
+    n_clusters: 14
+    confidence: 0.01
+    recent_samples_size: 3332
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 468
+    threshold: 0.3505010740981773
+    recent_samples_size: 3640
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 260
+    feature_proportion: 0.6293210008134319
+    n_clusters: 10
+    confidence: 0.1
+    recent_samples_size: 4475
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1039
+    n_consecutive_deviations: 18
+    n_permutations: 729
+    update_interval: 56
+    recent_samples_size: 3361
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 248
+    feature_proportion: 0.6609063388789517
+    n_clusters: 6
+    confidence: 0.01
+    recent_samples_size: 604
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 3803
+    recent_samples_proportion: 0.4882055221816701
+    threshold: 0.890255085412118
+    recent_samples_size: 2895
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 24
+    n_samples: 99
+    disjoint_training_windows: true
+    recent_samples_size: 2162
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1090
+    n_consecutive_deviations: 8
+    n_permutations: 755
+    update_interval: 71
+    recent_samples_size: 4994
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 448
+    const: 0.7562457708447993
+    threshold: 0.8391999974152413
+    max_depth: 2
+    recent_samples_size: 2501
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 235
+    n_clusters: 3
+    threshold: 0.900266103817118
+    recent_samples_size: 4816
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 26
+    n_samples: 178
+    disjoint_training_windows: false
+    recent_samples_size: 201
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 636
+    n_clusters: 9
+    threshold: 0.871844905476347
+    recent_samples_size: 842
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 155
+    feature_proportion: 0.1285741154426205
+    n_clusters: 12
+    confidence: 0.25
+    recent_samples_size: 1047
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 188
+    feature_proportion: 0.15513101511333577
+    n_clusters: 22
+    confidence: 0.05
+    recent_samples_size: 1461
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 848
+    n_clusters: 6
+    threshold: 3.3103788743414215
+    recent_samples_size: 1114
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 499
+    threshold: 0.6673354668583479
+    recent_samples_size: 716
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 336
+    threshold: 0.39144671376801676
+    recent_samples_size: 71
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4574
+    recent_samples_proportion: 0.12010164988150548
+    threshold: 0.4295367786538683
+    recent_samples_size: 1811
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 964
+    n_clusters: 11
+    threshold: 2.4725396445930574
+    recent_samples_size: 605
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 3129
+    recent_samples_proportion: 0.1256156133378788
+    threshold: 0.7998263769725441
+    recent_samples_size: 2147
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1154
+    n_consecutive_deviations: 13
+    n_permutations: 650
+    update_interval: 97
+    recent_samples_size: 2531
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1864
+    n_consecutive_deviations: 13
+    n_permutations: 436
+    update_interval: 31
+    recent_samples_size: 3218
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 6
+    n_samples: 128
+    disjoint_training_windows: true
+    recent_samples_size: 2332
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1895
+    n_consecutive_deviations: 1
+    n_permutations: 411
+    update_interval: 29
+    recent_samples_size: 753
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 260
+    n_clusters: 5
+    threshold: 4.258085370702863
+    recent_samples_size: 175
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 168
+    const: 2.389631536453221
+    threshold: 0.10689041898669976
+    max_depth: 9
+    recent_samples_size: 1566
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 472
+    threshold: 0.46184684036039814
+    recent_samples_size: 3158
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 222
+    feature_proportion: 0.8627567369887004
+    n_clusters: 28
+    confidence: 0.01
+    recent_samples_size: 4860
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 11
+    n_samples: 47
+    disjoint_training_windows: false
+    recent_samples_size: 2972
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 2549
+    recent_samples_proportion: 0.4687070719233291
+    threshold: 0.7654716306755682
+    recent_samples_size: 3436
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 357
+    threshold: 0.6904650869204152
+    recent_samples_size: 1786
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 180
+    feature_proportion: 0.6210773041260799
+    n_clusters: 27
+    confidence: 0.005
+    recent_samples_size: 4891
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 414
+    n_clusters: 17
+    threshold: 3.162766391675113
+    recent_samples_size: 2828
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 926
+    n_clusters: 4
+    threshold: 4.468945469383679
+    recent_samples_size: 2638
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1908
+    n_consecutive_deviations: 4
+    n_permutations: 774
+    update_interval: 99
+    recent_samples_size: 363
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 359
+    threshold: 0.3578789325183164
+    recent_samples_size: 3950
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 230
+    feature_proportion: 0.9354747084778511
+    n_clusters: 7
+    confidence: 0.005
+    recent_samples_size: 403
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4130
+    recent_samples_proportion: 0.2836075827147045
+    threshold: 0.7617267286650703
+    recent_samples_size: 2096
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 69
+    const: 2.0884015760720254
+    threshold: 0.1570755382561183
+    max_depth: 10
+    recent_samples_size: 1179
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 406
+    threshold: 0.3468426890181354
+    recent_samples_size: 4207
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 473
+    feature_proportion: 0.8423986655352315
+    n_clusters: 28
+    confidence: 0.25
+    recent_samples_size: 635
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 964
+    n_clusters: 9
+    threshold: 3.1544741253829134
+    recent_samples_size: 199
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 28
+    n_samples: 28
+    disjoint_training_windows: true
+    recent_samples_size: 3966
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 27
+    n_samples: 57
+    disjoint_training_windows: true
+    recent_samples_size: 2997
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 177
+    threshold: 0.8121299072410185
+    recent_samples_size: 2875
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 935
+    n_clusters: 11
+    threshold: 4.303741051282395
+    recent_samples_size: 3348
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 6
+    n_samples: 64
+    disjoint_training_windows: false
+    recent_samples_size: 4094
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 82
+    const: 7.565005875790258
+    threshold: 0.7901885659034761
+    max_depth: 5
+    recent_samples_size: 4636
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1514
+    n_consecutive_deviations: 10
+    n_permutations: 907
+    update_interval: 36
+    recent_samples_size: 3633
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 214
+    const: 1.8312052639247312
+    threshold: 0.11435630606776384
+    max_depth: 7
+    recent_samples_size: 2310
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 219
+    const: 7.5822555936467015
+    threshold: 0.42569013804140077
+    max_depth: 7
+    recent_samples_size: 2681
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 434
+    threshold: 0.5960929704318365
+    recent_samples_size: 2147
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 2340
+    recent_samples_proportion: 0.2800039696617214
+    threshold: 0.12406611682795568
+    recent_samples_size: 2209
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 361
+    feature_proportion: 0.35843213057612544
+    n_clusters: 22
+    confidence: 0.1
+    recent_samples_size: 2612
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 277
+    n_consecutive_deviations: 6
+    n_permutations: 735
+    update_interval: 21
+    recent_samples_size: 1783
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 179
+    const: 6.720690323707402
+    threshold: 0.8124428966172045
+    max_depth: 8
+    recent_samples_size: 984
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 2839
+    recent_samples_proportion: 0.05357963409298304
+    threshold: 0.5560606955904263
+    recent_samples_size: 1718
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 270
+    n_clusters: 4
+    threshold: 1.2963879446944424
+    recent_samples_size: 830
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 216
+    n_clusters: 12
+    threshold: 1.5533599969693843
+    recent_samples_size: 4696
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 347
+    feature_proportion: 0.6945737223005838
+    n_clusters: 25
+    confidence: 0.25
+    recent_samples_size: 1518
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 272
+    recent_samples_proportion: 0.39016836468130317
+    threshold: 0.7409869920079726
+    recent_samples_size: 1738
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 2203
+    recent_samples_proportion: 0.06568480593822079
+    threshold: 0.3595338799439275
+    recent_samples_size: 2738
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 28
+    n_samples: 175
+    disjoint_training_windows: false
+    recent_samples_size: 1380
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 137
+    const: 7.578731991561006
+    threshold: 0.13961070749812665
+    max_depth: 1
+    recent_samples_size: 1365
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 400
+    feature_proportion: 0.9457415400502821
+    n_clusters: 3
+    confidence: 0.005
+    recent_samples_size: 2195
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 410
+    const: 9.219149520352287
+    threshold: 0.6363047709651222
+    max_depth: 8
+    recent_samples_size: 903
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1834
+    n_consecutive_deviations: 7
+    n_permutations: 916
+    update_interval: 27
+    recent_samples_size: 3263
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 3972
+    recent_samples_proportion: 0.32061661888488213
+    threshold: 0.4967093738354359
+    recent_samples_size: 2701
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 841
+    n_consecutive_deviations: 14
+    n_permutations: 861
+    update_interval: 61
+    recent_samples_size: 346

@@ -1,0 +1,15 @@
+seed: 1
+ensemble_size: 2
+detectors:
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 663
+    n_clusters: 20
+    threshold: 0.9858415679554894
+    recent_samples_size: 800
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 30
+    n_samples: 161
+    disjoint_training_windows: false
+    recent_samples_size: 315

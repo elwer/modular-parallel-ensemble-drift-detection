@@ -1,0 +1,105 @@
+seed: 4
+ensemble_size: 16
+detectors:
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 427
+    feature_proportion: 0.25180324417338784
+    n_clusters: 23
+    confidence: 0.1
+    recent_samples_size: 384
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4524
+    recent_samples_proportion: 0.27080042706578433
+    threshold: 0.29924692107101053
+    recent_samples_size: 341
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 8
+    n_samples: 155
+    disjoint_training_windows: false
+    recent_samples_size: 3403
+- class: detectors.csddm.CSDDM
+  params:
+    n_samples: 383
+    feature_proportion: 0.9888916461187249
+    n_clusters: 17
+    confidence: 0.1
+    recent_samples_size: 2031
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 998
+    n_consecutive_deviations: 14
+    n_permutations: 603
+    update_interval: 14
+    recent_samples_size: 1844
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 531
+    n_clusters: 16
+    threshold: 1.3180712727638686
+    recent_samples_size: 3554
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 475
+    const: 2.235625802993321
+    threshold: 0.25016807336598845
+    max_depth: 1
+    recent_samples_size: 2133
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 179
+    threshold: 0.2939112992625066
+    recent_samples_size: 1754
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 445
+    const: 2.3915198753001805
+    threshold: 0.79576761282496
+    max_depth: 3
+    recent_samples_size: 2712
+- class: detectors.ocdd.OCDD
+  params:
+    n_samples: 76
+    threshold: 0.8128203983785699
+    recent_samples_size: 2626
+- class: detectors.udetect.UDetect
+  params:
+    n_windows: 23
+    n_samples: 49
+    disjoint_training_windows: false
+    recent_samples_size: 381
+- class: detectors.d3.D3
+  params:
+    n_reference_samples: 4099
+    recent_samples_proportion: 0.22436271042979417
+    threshold: 0.44408605224443254
+    recent_samples_size: 4738
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 134
+    const: 3.4322368862660695
+    threshold: 0.6255271999313179
+    max_depth: 6
+    recent_samples_size: 3490
+- class: detectors.ibdd.IBDD
+  params:
+    n_samples: 1181
+    n_consecutive_deviations: 7
+    n_permutations: 770
+    update_interval: 97
+    recent_samples_size: 2247
+- class: detectors.spll.SPLL
+  params:
+    n_samples: 446
+    n_clusters: 14
+    threshold: 4.785767384114214
+    recent_samples_size: 659
+- class: detectors.bndm.BNDM
+  params:
+    n_samples: 489
+    const: 9.713773946261416
+    threshold: 0.869419053959018
+    max_depth: 4
+    recent_samples_size: 414
