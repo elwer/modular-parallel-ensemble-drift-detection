@@ -18,6 +18,7 @@
 
 #SBATCH --job-name=SyntheticDD
 #SBATCH --cpu-freq=2000000
+#SBATCH --nodes=1
 #SBATCH --cpus-per-task=16
 #SBATCH --ntasks=1
 #SBATCH --time=24:00:00
@@ -30,7 +31,7 @@ source setup.sh
 
 dataset_label="${DATASET%%(*}"
 mkdir -p "${OUT_DIR}/${dataset_label}"
-LOG="${OUT_DIR}/${dataset_label}/seed${SEED}.log"
+LOG="${OUT_DIR}/${dataset_label}/seed${SEED}_det-${DETECTOR_DECISION_CRITERIA}_ens-${ENSEMBLE_DECISION_CRITERIA}_dw${DECISION_WINDOW}_sw${SUPPRESSION_WINDOW}.log"
 
 extra_args=()
 if [[ -n "${RECENT_SAMPLES_SIZE:-}" ]]; then
