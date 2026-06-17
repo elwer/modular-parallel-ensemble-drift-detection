@@ -56,8 +56,8 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 CLASSIFIER = 'HoeffdingTreeClassifier'
-N_TRAINING_SAMPLES = 1600
-SEED = 42
+N_TRAINING_SAMPLES = 2000
+SEED = 1337
 
 ALL_DATASETS = ['Electricity', 'GasSensor', 'ForestCovertype', 'PokerHand', 'RialtoBridgeTimelapse']
 
