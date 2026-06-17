@@ -87,6 +87,7 @@ for dataset_expr in "${DATASETS[@]}"; do
                             --export=ALL \
                             "${SBATCH_TEMPLATE}"
                         n_jobs=$((n_jobs + 1))
+                        sleep 1
                     done
                 done
             done

@@ -26,7 +26,8 @@
 
 set -euo pipefail
 
-cd /data/quokka/ws/9/s4122485-parallelDD/parallel-unsupervised-concept-drift-detection
+#cd /data/quokka/ws/9/s4122485-parallelDD/parallel-unsupervised-concept-drift-detection
+cd /data/horse/ws/s4122485-parallelDD/modular-parallel-ensemble-drift-detection
 source setup.sh
 
 dataset_label="${DATASET%%(*}"
