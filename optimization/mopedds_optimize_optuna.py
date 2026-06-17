@@ -194,8 +194,7 @@ def objective(trial: optuna.Trial):
         # Load dataset
         dataset_class = getattr(datasets, DATASET)
         dataset = dataset_class(directory_path='/tmp')
-        stream = iter(dataset)
-        
+
         # Create MOPEDDS detector
         detector = MOPEDDS(
             seed=SEED,
@@ -210,10 +209,11 @@ def objective(trial: optuna.Trial):
             CLASSIFIER,
             f'{CLASSIFIER}_{DATASET}.pkl'
         )
-        
-        # Run stream
+
+        # Pass the dataset (iterable), not iter(dataset): run_stream calls
+        # islice(stream, ...) twice and needs iter() to be invoked freshly each time.
         drifts, labels, predictions, n_req_labels, runtime, peak_memory, mean_memory = \
-            detector.run_stream(stream, N_TRAINING_SAMPLES, classifier_path)
+            detector.run_stream(dataset, N_TRAINING_SAMPLES, classifier_path)
         
         signal.alarm(0)  # Cancel the alarm
         

@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 DATASET = None  # Set from CLI argument
 CLASSIFIER = 'HoeffdingTreeClassifier'
 N_TRAINING_SAMPLES = 1600
-SEED = 42
+SEED = 1337
 TRIAL_TIMEOUT = 3600  # 60 minutes per trial
 
 
@@ -61,10 +61,13 @@ def run_detector(detector, classifier_path: str):
     
     dataset_class = getattr(datasets, DATASET)
     dataset = dataset_class(directory_path='/tmp')
-    stream = iter(dataset)
-    
+    # NOTE: pass the dataset (iterable), not iter(dataset). run_stream
+    # iterates the stream twice (once in load_main_clf, once in
+    # process_main_stream) and relies on each islice() call calling iter()
+    # afresh on the dataset. Passing a pre-instantiated iterator causes the
+    # second islice to skip an extra n_training_samples elements.
     drifts, labels, predictions, n_req_labels, runtime, peak_memory, mean_memory = \
-        detector.run_stream(stream, N_TRAINING_SAMPLES, classifier_path)
+        detector.run_stream(dataset, N_TRAINING_SAMPLES, classifier_path)
     
     signal.alarm(0)  # Cancel the alarm
     

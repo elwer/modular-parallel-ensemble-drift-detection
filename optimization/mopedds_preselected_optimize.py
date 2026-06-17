@@ -287,7 +287,6 @@ def make_objective(candidates, optimize_detector_selection=False):
 
             dataset_class = getattr(datasets, DATASET)
             dataset = dataset_class(directory_path='/tmp')
-            stream = iter(dataset)
 
             detector = MOPEDDS(
                 seed=SEED,
@@ -300,8 +299,10 @@ def make_objective(candidates, optimize_detector_selection=False):
                 'model', CLASSIFIER, f'{CLASSIFIER}_{DATASET}.pkl',
             )
 
+            # Pass the dataset (iterable), not iter(dataset): run_stream calls
+            # islice(stream, ...) twice and needs iter() to be invoked freshly each time.
             drifts, labels, predictions, n_req_labels, runtime, peak_memory, mean_memory = \
-                detector.run_stream(stream, N_TRAINING_SAMPLES, classifier_path)
+                detector.run_stream(dataset, N_TRAINING_SAMPLES, classifier_path)
 
             signal.alarm(0)
 

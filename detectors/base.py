@@ -10,17 +10,13 @@ from metrics.computational_metrics import computational_metrics
 
 
 class DriftDetector(ABC):
-    def __init__(self, seed: Optional[int] = None,
+    def __init__(self, seed: Optional[int] = 1337,
                  recent_samples_size: int = 500,
                  feature_id: int = None):
         if seed is None:
-            seed = int(1337)
-            random.seed(seed)
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
-        self.seed = seed
+            seed = 1337
+        self.seed = int(seed)
+        self._seed_globals()
         self.recent_samples = []
         self.recent_samples_size = recent_samples_size
         self.drifts = []
@@ -32,6 +28,25 @@ class DriftDetector(ABC):
         if not self.feature_id is None:
             self.single_variate = True
         self.feature_key = None
+
+    def _seed_globals(self):
+        """Seed every RNG that the pipeline may consume from.
+
+        Called both at construction and at the entry of
+        ``process_main_stream`` / ``process_main_batch_stream`` so that the
+        run is deterministic regardless of what the surrounding process
+        (e.g. an Optuna sampler, ``parse_expression``, library imports)
+        did to the global RNG state beforehand. Reseeding inside
+        ``process_main_stream`` is necessary because that method is
+        executed inside a forked child by
+        ``memory_profiler.memory_usage``; the child inherits the parent's
+        RNG state at fork time.
+        """
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
 
     @abstractmethod
     def update(
@@ -103,6 +118,10 @@ class UnsupervisedDriftDetector(DriftDetector):
     @computational_metrics
     @scorep.user.region("UnsupervisedDriftDetector.process_main_stream")
     def process_main_stream(self, stream, n_training_samples: int, classifier):
+        # Reseed inside the (potentially forked) worker so that the run is
+        # independent of any RNG state drift that happened in the parent
+        # process before this method was invoked.
+        self._seed_globals()
         # Processing the rest of the stream for detecting drifts
         for i, (x, y) in enumerate(islice(stream, n_training_samples, None),
                                    start=n_training_samples):
@@ -223,6 +242,8 @@ class BatchDetector(DriftDetector):
     @computational_metrics
     def process_main_batch_stream(self, stream, n_training_samples: int,
                                   classifier):
+        # See UnsupervisedDriftDetector.process_main_stream for rationale.
+        self._seed_globals()
         # Processing the rest of the stream for detecting drifts
         for batch_id, batch in enumerate(self.batch_stream(
                 stream, n_training_samples)):

@@ -206,10 +206,10 @@ def run_detector_on_dataset(detector, dataset_name, tmp_dir):
     try:
         dataset_class = getattr(datasets, dataset_name)
         dataset = dataset_class(directory_path=tmp_dir)
-        stream = iter(dataset)
-
+        # Pass the dataset (iterable), not iter(dataset): run_stream calls
+        # islice(stream, ...) twice and needs iter() to be invoked freshly each time.
         drifts, labels, predictions, n_req_labels, runtime, peak_memory, mean_memory = \
-            detector.run_stream(stream, N_TRAINING_SAMPLES, get_classifier_path(dataset_name))
+            detector.run_stream(dataset, N_TRAINING_SAMPLES, get_classifier_path(dataset_name))
 
         signal.alarm(0)
 

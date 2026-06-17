@@ -84,10 +84,10 @@ def run_detector_on_dataset(detector, dataset_name, tmp_dir):
     """Run a detector on a dataset. Returns (accuracy, runtime, n_drifts)."""
     dataset_class = getattr(datasets, dataset_name)
     dataset = dataset_class(directory_path=tmp_dir)
-    stream = iter(dataset)
-
+    # Pass the dataset (iterable), not iter(dataset): run_stream calls
+    # islice(stream, ...) twice and needs iter() to be invoked freshly each time.
     drifts, labels, predictions, n_req_labels, runtime, peak_memory, mean_memory = \
-        detector.run_stream(stream, N_TRAINING_SAMPLES, get_classifier_path(dataset_name))
+        detector.run_stream(dataset, N_TRAINING_SAMPLES, get_classifier_path(dataset_name))
 
     correct = sum(1 for l, p in zip(labels, predictions) if l == p)
     accuracy = correct / len(labels) if labels else 0.0
