@@ -91,8 +91,8 @@ class IBDD(UnsupervisedDriftDetector):
         evaluation_values = np.fromiter(
             itertools.islice(
                 self.recent_deviations,
-                len(self.recent_deviations) - (
-                            self.n_consecutive_deviations + 1),
+                max(0, len(self.recent_deviations) - (
+                            self.n_consecutive_deviations + 1)),
                 len(self.recent_deviations),
             ),
             dtype=float,
