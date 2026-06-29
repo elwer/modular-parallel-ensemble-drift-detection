@@ -48,6 +48,10 @@ POOL_SOURCE_TAG_OVERRIDE="${POOL_SOURCE_TAG:-}"
 
 FORCE_POOL="${FORCE_POOL:-0}"
 
+# Pin one or more MOPEDDS globals to fixed values for both the N=1 study and
+# the greedy stage. Pass as 'key1=val1,key2=val2'. Used by the ablation driver.
+PIN_GLOBALS="${PIN_GLOBALS:-}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 N1_SBATCH="${SCRIPT_DIR}/optimize_synthetic_f1_multistream.sbatch"
 GREEDY_SBATCH="${SCRIPT_DIR}/greedy_ensemble.sbatch"
@@ -121,6 +125,7 @@ for entry in "${GENERATORS[@]}"; do
               TIMEOUT="${N1_TIMEOUT}" \
               SEED="${SEED}" \
               OUT_DIR="${OUT_DIR}" \
+              PIN_GLOBALS="${PIN_GLOBALS}" \
               sbatch --parsable \
                   --job-name="SynthF1ms_${tag}_N1" \
                   --export=ALL \
@@ -136,6 +141,7 @@ for entry in "${GENERATORS[@]}"; do
     GJID=$(GENERATOR="${GEN_ENV}" \
            GENERATORS="${GEN_LIST_ENV}" \
            STUDY_TAG="${STUDY_TAG_ENV}" \
+           PIN_GLOBALS="${PIN_GLOBALS}" \
            N_STREAMS="${N_STREAMS}" \
            BASE_STREAM_SEED="${BASE_STREAM_SEED}" \
            DRIFT_FREQUENCIES="${DRIFT_FREQUENCIES}" \

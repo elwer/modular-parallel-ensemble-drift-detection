@@ -71,6 +71,9 @@ fi
 if [[ "${STOP_ON_NO_IMPROVE:-0}" == "1" ]]; then
     EXTRA_ARGS+=(--stop-on-no-improve)
 fi
+if [[ -n "${PIN_GLOBALS:-}" ]]; then
+    EXTRA_ARGS+=(--pin-globals "${PIN_GLOBALS}")
+fi
 
 python optimization/greedy_ensemble_from_pool.py \
     --n-streams "${N_STREAMS}" \

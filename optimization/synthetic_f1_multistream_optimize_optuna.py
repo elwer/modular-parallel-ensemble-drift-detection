@@ -56,7 +56,7 @@ import warnings
 import datetime
 import multiprocessing as mp
 from argparse import ArgumentParser
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import optuna
 from optuna.samplers import TPESampler
@@ -256,7 +256,8 @@ def make_objective(*, generators: List[str],
                    size: int,
                    detector_seed: int,
                    per_trial_timeout: int,
-                   objective_metric: str):
+                   objective_metric: str,
+                   pinned_globals: Dict[str, object] = None):
     assert (len(generators) == len(drift_frequencies)
             == len(stream_seeds) == len(tolerances))
     # Probe each TRAIN stream once to count its known drifts (cheap & lets
@@ -270,8 +271,18 @@ def make_objective(*, generators: List[str],
                              f"attribute on its produced stream.")
         train_known_counts.append(len(list(probe.drifts)))
 
+    pinned_globals = dict(pinned_globals or {})
     train_tolerances = [tolerances[i] for i in train_indices]
     suppression_max = max(0, min(train_tolerances)) if train_tolerances else 0
+    # Clip pinned suppression_window if it exceeds the allowed range. This
+    # makes the ablation script's life easier (it can pass a fixed value
+    # without knowing the per-stream tolerances).
+    if "suppression_window" in pinned_globals:
+        pv = int(pinned_globals["suppression_window"])
+        if pv < 0 or pv > suppression_max:
+            raise ValueError(
+                f"--pin-globals suppression_window={pv} out of valid range "
+                f"[0,{suppression_max}] given train tolerances {train_tolerances}.")
 
     logger.info(
         f"Generators(train)={[generators[i] for i in train_indices]} size={size} "
@@ -282,15 +293,32 @@ def make_objective(*, generators: List[str],
         f"suppression_max={suppression_max}")
 
     def objective(trial: optuna.Trial) -> float:
-        # MOPEDDS-level params
-        det_crit = trial.suggest_categorical(
+        # MOPEDDS-level params. Each global is either sampled by Optuna or
+        # pinned via --pin-globals (and recorded as a user_attr so trials
+        # remain comparable across the search history).
+        def _maybe_pin_categorical(key: str, choices):
+            if key in pinned_globals:
+                trial.set_user_attr(f"pinned_{key}", pinned_globals[key])
+                return pinned_globals[key]
+            return trial.suggest_categorical(key, choices)
+
+        def _maybe_pin_int(key: str, low: int, high: int):
+            if key in pinned_globals:
+                trial.set_user_attr(f"pinned_{key}", pinned_globals[key])
+                return int(pinned_globals[key])
+            return trial.suggest_int(key, low, high)
+
+        det_crit = _maybe_pin_categorical(
             "detector_decision_criteria", ["any", "majority", "all"])
-        ens_crit = trial.suggest_categorical(
+        ens_crit = _maybe_pin_categorical(
             "ensemble_decision_criteria", ["any", "majority", "all"])
-        decision_window = trial.suggest_int("decision_window", 1, 100)
-        suppression_window = trial.suggest_int(
-            "suppression_window", 0, suppression_max) if suppression_max > 0 else 0
-        recent_samples_size = trial.suggest_int("recent_samples_size", 50, 5000)
+        decision_window = _maybe_pin_int("decision_window", 1, 100)
+        if suppression_max > 0:
+            suppression_window = _maybe_pin_int(
+                "suppression_window", 0, suppression_max)
+        else:
+            suppression_window = 0
+        recent_samples_size = _maybe_pin_int("recent_samples_size", 50, 5000)
 
         # Slot composition + per-slot params
         slot_specs = []
@@ -522,6 +550,54 @@ def _resolve_generators(arg_generators: str, legacy_generator: str,
     return gens
 
 
+_PINNABLE_GLOBAL_KEYS = (
+    "detector_decision_criteria",
+    "ensemble_decision_criteria",
+    "decision_window",
+    "suppression_window",
+    "recent_samples_size",
+)
+_PINNABLE_GLOBAL_CATEGORICAL = {
+    "detector_decision_criteria": ("any", "majority", "all"),
+    "ensemble_decision_criteria": ("any", "majority", "all"),
+}
+
+
+def _parse_pin_globals(spec: str) -> Dict[str, object]:
+    """Parse a 'key1=val1,key2=val2' string into a validated pin dict. Empty
+    or None input returns an empty dict. Integer-valued keys are coerced to
+    int; categorical keys are validated against the allowed value sets."""
+    if not spec:
+        return {}
+    out: Dict[str, object] = {}
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise ValueError(f"--pin-globals entry '{part}' missing '='.")
+        key, val = part.split("=", 1)
+        key = key.strip()
+        val = val.strip()
+        if key not in _PINNABLE_GLOBAL_KEYS:
+            raise ValueError(
+                f"--pin-globals key '{key}' not pinnable. Allowed: "
+                f"{list(_PINNABLE_GLOBAL_KEYS)}")
+        if key in _PINNABLE_GLOBAL_CATEGORICAL:
+            choices = _PINNABLE_GLOBAL_CATEGORICAL[key]
+            if val not in choices:
+                raise ValueError(
+                    f"--pin-globals {key}={val} not in {list(choices)}.")
+            out[key] = val
+        else:
+            try:
+                out[key] = int(val)
+            except ValueError as e:
+                raise ValueError(
+                    f"--pin-globals {key}={val} expected int.") from e
+    return out
+
+
 def _resolve_study_tag(arg_tag: str, generators: List[str]) -> str:
     """Tag used in CSV/study names. If the user passes one, use it. Otherwise
     derive a stable name from the per-stream generator list."""
@@ -749,6 +825,12 @@ def main():
                          "Defaults to the single generator name when all "
                          "streams share a generator, otherwise 'Mix_' joined "
                          "by '+' of the sorted unique generator names.")
+    ap.add_argument("--pin-globals", default=None,
+                    help="Comma-separated 'key=value' overrides that pin one "
+                         "or more MOPEDDS-level globals during the Optuna "
+                         "search (the corresponding dimension is removed from "
+                         "the search space). Pinnable keys: "
+                         + ", ".join(_PINNABLE_GLOBAL_KEYS) + ".")
     ap.add_argument("--size", type=int, required=True,
                     help="Ensemble size (number of detector slots).")
     ap.add_argument("--n-streams", type=int, default=10,
@@ -816,6 +898,7 @@ def main():
     generators_list = _resolve_generators(args.generators, args.generator,
                                           args.n_streams)
     study_tag = _resolve_study_tag(args.study_tag, generators_list)
+    pinned_globals = _parse_pin_globals(args.pin_globals)
     if args.tolerances is None:
         tolerances = _default_tolerances(drift_frequencies)
     else:
@@ -860,6 +943,8 @@ def main():
     print("=" * 80)
     print(f"  Study tag         : {study_tag}")
     print(f"  Generators (all)  : {generators_list}")
+    if pinned_globals:
+        print(f"  Pinned globals    : {pinned_globals}")
     print(f"  Ensemble size N   : {args.size}")
     print(f"  Streams per trial : {args.n_streams}")
     print(f"  Stream seeds      : {stream_seeds}")
@@ -893,7 +978,7 @@ def main():
     if n_workers == 1:
         _run_worker(args, study_name, storage, stream_seeds,
                     drift_frequencies, tolerances, train_indices,
-                    generators_list, study_tag, worker_idx=0)
+                    generators_list, study_tag, pinned_globals, worker_idx=0)
     else:
         ctx = mp.get_context("spawn")
         procs = []
@@ -902,7 +987,7 @@ def main():
                 target=_run_worker,
                 args=(args, study_name, storage, stream_seeds,
                       drift_frequencies, tolerances, train_indices,
-                      generators_list, study_tag, w),
+                      generators_list, study_tag, pinned_globals, w),
                 name=f"optuna-worker-{w}",
             )
             p.start()
@@ -966,6 +1051,7 @@ def _run_worker(args, study_name: str, storage_url: str,
                 train_indices: List[int],
                 generators: List[str],
                 study_tag: str,
+                pinned_globals: Dict[str, object],
                 worker_idx: int):
     sampler = TPESampler(seed=args.seed + worker_idx)
     study = optuna.create_study(
@@ -992,6 +1078,7 @@ def _run_worker(args, study_name: str, storage_url: str,
         detector_seed=args.seed + 1000 * worker_idx,
         per_trial_timeout=args.per_trial_timeout,
         objective_metric=args.objective,
+        pinned_globals=pinned_globals,
     )
     callbacks = [_csv_writer(results_csv)]
 

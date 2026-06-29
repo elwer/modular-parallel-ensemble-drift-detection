@@ -72,6 +72,9 @@ fi
 if [[ -n "${OBJECTIVE:-}" ]]; then
     EXTRA_ARGS+=(--objective "${OBJECTIVE}")
 fi
+if [[ -n "${PIN_GLOBALS:-}" ]]; then
+    EXTRA_ARGS+=(--pin-globals "${PIN_GLOBALS}")
+fi
 
 python optimization/synthetic_f1_multistream_optimize_optuna.py \
     --size "${SIZE}" \

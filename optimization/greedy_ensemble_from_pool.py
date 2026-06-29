@@ -58,6 +58,7 @@ from optimization.synthetic_f1_multistream_optimize_optuna import (  # noqa: E40
     CANDIDATES,
     _default_tolerances,
     _f1_from_counts,
+    _parse_pin_globals,
     _resolve_generators,
     _resolve_list,
     _resolve_stream_seeds,
@@ -487,6 +488,14 @@ def main():
                          "explicitly via --output-csv). Defaults to the single "
                          "generator name when homogeneous, otherwise 'Mix_' + "
                          "'+'-joined sorted unique generators.")
+    ap.add_argument("--pin-globals", default=None,
+                    help="Comma-separated 'key=value' overrides applied AFTER "
+                         "--globals resolution. Use to force specific values "
+                         "of detector_decision_criteria, ensemble_decision_"
+                         "criteria, decision_window, suppression_window, "
+                         "recent_samples_size. If ensemble_decision_criteria "
+                         "is pinned, --inner-search-ens-crit is implicitly "
+                         "disabled.")
     ap.add_argument("--n-streams", type=int, default=10)
     ap.add_argument("--base-stream-seed", type=int, default=42)
     ap.add_argument("--stream-seeds", default=None)
@@ -597,6 +606,26 @@ def main():
     else:
         raise ValueError(f"Unknown --globals: {args.globals}")
 
+    # Apply --pin-globals overrides on top of the resolved base config.
+    pinned_globals = _parse_pin_globals(args.pin_globals)
+    if pinned_globals:
+        logger.info("Pinning globals: %s", pinned_globals)
+        det_crit = pinned_globals.get("detector_decision_criteria", det_crit)
+        ens_crit = pinned_globals.get("ensemble_decision_criteria", ens_crit)
+        decision_window = pinned_globals.get("decision_window", decision_window)
+        suppression_window = pinned_globals.get(
+            "suppression_window", suppression_window)
+        recent_samples_size = pinned_globals.get(
+            "recent_samples_size", recent_samples_size)
+
+    # If ens_crit is pinned, force-disable inner search over it so the
+    # ablation actually fixes that dimension.
+    inner_search_ens_crit = args.inner_search_ens_crit
+    if "ensemble_decision_criteria" in pinned_globals and inner_search_ens_crit:
+        logger.info("ensemble_decision_criteria is pinned; "
+                    "disabling --inner-search-ens-crit.")
+        inner_search_ens_crit = False
+
     base_global = GlobalConfig(
         detector_decision_criteria=det_crit,
         ensemble_decision_criteria=ens_crit,
@@ -636,7 +665,7 @@ def main():
         train_indices=train_indices,
         eval_indices=eval_indices,
         base_global=base_global,
-        inner_search_ens_crit=args.inner_search_ens_crit,
+        inner_search_ens_crit=inner_search_ens_crit,
         detector_seed=args.seed,
         max_n=args.max_n,
         stop_on_no_improve=args.stop_on_no_improve,
