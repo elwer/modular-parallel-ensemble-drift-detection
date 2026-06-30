@@ -742,14 +742,20 @@ def main():
     # Build the pool.
     csv_paths: List[str] = list(args.pool_csv)
     if args.pool_glob:
-        csv_paths += sorted(glob.glob(args.pool_glob))
+        matched = glob.glob(args.pool_glob)
+        logger.info(f"Pool glob '{args.pool_glob}' matched {len(matched)} files")
+        csv_paths += sorted(matched)
     pool: List[PoolEntry] = []
     if csv_paths:
+        logger.info(f"Loading pool from {len(csv_paths)} CSV files")
         pool += load_pool_from_csvs(csv_paths)
     if args.optuna_storage:
         if not args.optuna_study:
             raise ValueError("--optuna-storage requires --optuna-study.")
         pool += load_pool_from_optuna(args.optuna_storage, args.optuna_study)
+    logger.info(f"Pool size after loading: {len(pool)}")
+    if pool:
+        logger.info(f"First pool entry: kind={pool[0].kind}, params={pool[0].params}, macro_f1={pool[0].macro_f1}")
     if not pool:
         raise ValueError("Empty pool: pass --pool-csv / --pool-glob / "
                          "--optuna-storage so the script has candidates.")

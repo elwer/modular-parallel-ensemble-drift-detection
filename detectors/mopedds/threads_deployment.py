@@ -193,7 +193,7 @@ class ThreadsDeployment:
             self.workers.append(worker)
         
         self._initialized = True
-        logger.info(f"MOPEDDS initialized with {num_detectors} workers (level1={self.detector_decision_criteria}, window={self.decision_window})")
+        logger.debug(f"MOPEDDS initialized with {num_detectors} workers (level1={self.detector_decision_criteria}, window={self.decision_window})")
 
     def clear_all_histories(self):
         """Signal all workers to clear their decision histories."""
