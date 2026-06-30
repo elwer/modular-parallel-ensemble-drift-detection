@@ -47,6 +47,7 @@ import json
 import glob
 import math
 import logging
+import signal
 import multiprocessing as mp
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
@@ -71,6 +72,33 @@ from optimization.synthetic_f1_multistream_optimize_optuna import (  # noqa: E40
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# Default timeout for individual evaluations (seconds)
+DEFAULT_EVAL_TIMEOUT = 600  # 10 minutes
+
+
+class TimeoutError(Exception):
+    """Raised when an evaluation exceeds the timeout."""
+    pass
+
+
+def _timeout_handler(signum, frame):
+    raise TimeoutError("Evaluation exceeded timeout")
+
+
+def with_timeout(func, timeout_seconds, *args, **kwargs):
+    """Run a function with a timeout using signal.alarm."""
+    if timeout_seconds <= 0:
+        return func(*args, **kwargs)
+    
+    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(timeout_seconds)
+    try:
+        result = func(*args, **kwargs)
+    finally:
+        signal.alarm(0)  # Cancel the alarm
+        signal.signal(signal.SIGALRM, old_handler)  # Restore old handler
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -402,22 +430,26 @@ def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], Dic
             suppression_window=base_global_dict["suppression_window"],
             recent_samples_size=base_global_dict["recent_samples_size"],
         )
-        m = evaluate_ensemble(
-            generators=generators,
-            drift_frequencies=drift_frequencies,
-            stream_length=stream_length,
-            stream_seeds=stream_seeds,
-            tolerances=tolerances,
-            indices=train_indices,
-            slot_specs=trial_specs,
-            detector_seed=detector_seed,
-            g=g,
-        )
-        return (m["macro_f1"], m["per_stream_f1"], cand_dict, ec, m)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise
+        try:
+            m = with_timeout(evaluate_ensemble, eval_timeout,
+                generators=generators,
+                drift_frequencies=drift_frequencies,
+                stream_length=stream_length,
+                stream_seeds=stream_seeds,
+                tolerances=tolerances,
+                indices=train_indices,
+                slot_specs=trial_specs,
+                detector_seed=detector_seed,
+                g=g,
+            )
+            return (m["macro_f1"], m["per_stream_f1"], cand_dict, ec, m)
+        except TimeoutError:
+            logger.warning(f"Evaluation timed out after {eval_timeout}s, returning worst score")
+            return (0.0, [0.0] * len(train_indices), cand_dict, ec, {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 def _compute_complementarity_score(
@@ -454,7 +486,8 @@ def greedy_select(*, pool: List[PoolEntry],
                   max_n: int,
                   stop_on_no_improve: bool,
                   n_workers: int = 1,
-                  selection_strategy: str = "complementarity"):
+                  selection_strategy: str = "complementarity",
+                  eval_timeout: int = DEFAULT_EVAL_TIMEOUT):
     history: List[Dict[str, object]] = []
     ensemble: List[PoolEntry] = []
     current_train = 0.0
@@ -567,17 +600,21 @@ def greedy_select(*, pool: List[PoolEntry],
                         suppression_window=base_global.suppression_window,
                         recent_samples_size=base_global.recent_samples_size,
                     )
-                    m = evaluate_ensemble(
-                        generators=generators,
-                        drift_frequencies=drift_frequencies,
-                        stream_length=stream_length,
-                        stream_seeds=stream_seeds,
-                        tolerances=tolerances,
-                        indices=train_indices,
-                        slot_specs=trial_specs,
-                        detector_seed=detector_seed,
-                        g=g,
-                    )
+                    try:
+                        m = with_timeout(evaluate_ensemble, eval_timeout,
+                            generators=generators,
+                            drift_frequencies=drift_frequencies,
+                            stream_length=stream_length,
+                            stream_seeds=stream_seeds,
+                            tolerances=tolerances,
+                            indices=train_indices,
+                            slot_specs=trial_specs,
+                            detector_seed=detector_seed,
+                            g=g,
+                        )
+                    except TimeoutError:
+                        logger.warning(f"Evaluation timed out after {eval_timeout}s, skipping candidate")
+                        m = {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)}
                     if selection_strategy == "complementarity":
                         score = _compute_complementarity_score(m["per_stream_f1"], current_train_per_stream)
                     else:  # macro_f1
@@ -610,17 +647,21 @@ def greedy_select(*, pool: List[PoolEntry],
             suppression_window=base_global.suppression_window,
             recent_samples_size=base_global.recent_samples_size,
         )
-        eval_metrics = evaluate_ensemble(
-            generators=generators,
-            drift_frequencies=drift_frequencies,
-            stream_length=stream_length,
-            stream_seeds=stream_seeds,
-            tolerances=tolerances,
-            indices=eval_indices,
-            slot_specs=[(e.kind, e.params) for e in ensemble],
-            detector_seed=detector_seed,
-            g=g_final,
-        )
+        try:
+            eval_metrics = with_timeout(evaluate_ensemble, eval_timeout,
+                generators=generators,
+                drift_frequencies=drift_frequencies,
+                stream_length=stream_length,
+                stream_seeds=stream_seeds,
+                tolerances=tolerances,
+                indices=eval_indices,
+                slot_specs=[(e.kind, e.params) for e in ensemble],
+                detector_seed=detector_seed,
+                g=g_final,
+            )
+        except TimeoutError:
+            logger.warning(f"Eval evaluation timed out after {eval_timeout}s, using train metrics")
+            eval_metrics = best_train_metrics
         current_train = best_train_metrics["macro_f1"]
         current_train_per_stream = best_train_metrics["per_stream_f1"]
         current_eval = eval_metrics["macro_f1"]
@@ -761,6 +802,9 @@ def main():
                     choices=["complementarity", "macro_f1"],
                     help="Strategy for selecting candidates: 'complementarity' "
                          "(boost weak streams, default) or 'macro_f1' (maximize average).")
+    ap.add_argument("--eval-timeout", type=int, default=DEFAULT_EVAL_TIMEOUT,
+                    help="Timeout in seconds for individual ensemble evaluations. "
+                         f"Default: {DEFAULT_EVAL_TIMEOUT} (10 minutes). Set to 0 to disable.")
     # Anchors for global params (det_crit, decision_window, ...). 'best' means
     # inherit from the top-1 pool entry; otherwise override explicitly.
     ap.add_argument("--globals", default="best",
@@ -910,6 +954,7 @@ def main():
         stop_on_no_improve=args.stop_on_no_improve,
         n_workers=args.n_workers,
         selection_strategy=args.selection_strategy,
+        eval_timeout=args.eval_timeout,
     )
 
     write_history_csv(args.output_csv, history)

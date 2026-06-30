@@ -2,7 +2,7 @@ from .sineclusters_pre import SineClustersPre
 from .waveform_pre import WaveformPre
 from .sineclusters import SineClusters
 from .waveform import WaveformDrift2
-#from .gas_sensor import GasSensor
+from .gas_sensor import GasSensor
 from .insects import (
     InsectsAbruptBalanced,
     InsectsAbruptImbalanced,
@@ -19,6 +19,7 @@ __all__ = [
     "WaveformPre",
     "SineClusters",
     "WaveformDrift2",
+    "GasSensor",
     "InsectsAbruptBalanced",
     "InsectsAbruptImbalanced",
     "InsectsGradualBalanced",
