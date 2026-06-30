@@ -333,11 +333,15 @@ def evaluate_ensemble(*, generators: List[str],
             if result:
                 detections.append(x)
         
+        logger.info(f"Stream {s_idx}: known drifts={len(known)}, MOPEDDS detections={len(detections)}")
+        
         # Apply suppression
         from main_synthetic import apply_suppression, evaluate_detections
         dets = apply_suppression(detections, g.suppression_window)
+        logger.info(f"Stream {s_idx}: after suppression={len(dets)}")
         tp, fp, fn, _mean_delay = evaluate_detections(dets, known, tolerances[s_idx])
         f1 = _f1_from_counts(tp, fp, fn)
+        logger.info(f"Stream {s_idx}: tp={tp}, fp={fp}, fn={fn}, f1={f1}")
         
         per_f1.append(float(f1))
         tp_total += int(tp); fp_total += int(fp); fn_total += int(fn)
