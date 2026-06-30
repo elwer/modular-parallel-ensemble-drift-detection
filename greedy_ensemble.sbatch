@@ -77,6 +77,9 @@ fi
 if [[ -n "${N_WORKERS:-}" ]]; then
     EXTRA_ARGS+=(--n-workers "${N_WORKERS}")
 fi
+if [[ -n "${SELECTION_STRATEGY:-}" ]]; then
+    EXTRA_ARGS+=(--selection-strategy "${SELECTION_STRATEGY}")
+fi
 
 python optimization/greedy_ensemble_from_pool.py \
     --n-streams "${N_STREAMS}" \

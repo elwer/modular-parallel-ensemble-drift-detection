@@ -313,34 +313,59 @@ def evaluate_ensemble(*, generators: List[str],
 ENS_CRITS = ("any", "majority", "all")
 
 
-def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, PoolEntry, str, Dict[str, object]]:
+def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], PoolEntry, str, Dict[str, object]]:
     """Worker function for parallel candidate evaluation.
     
-    Returns: (macro_f1, candidate, ens_crit, metrics)
+    Returns: (macro_f1, per_stream_f1, candidate, ens_crit, metrics)
     """
-    (cand, ensemble, ec, base_global, generators, drift_frequencies,
-     stream_length, stream_seeds, tolerances, train_indices, detector_seed) = args_tuple
+    try:
+        (cand, ensemble, ec, base_global, generators, drift_frequencies,
+         stream_length, stream_seeds, tolerances, train_indices, detector_seed) = args_tuple
+        
+        trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
+        g = GlobalConfig(
+            detector_decision_criteria=base_global.detector_decision_criteria,
+            ensemble_decision_criteria=ec,
+            decision_window=base_global.decision_window,
+            suppression_window=base_global.suppression_window,
+            recent_samples_size=base_global.recent_samples_size,
+        )
+        m = evaluate_ensemble(
+            generators=generators,
+            drift_frequencies=drift_frequencies,
+            stream_length=stream_length,
+            stream_seeds=stream_seeds,
+            tolerances=tolerances,
+            indices=train_indices,
+            slot_specs=trial_specs,
+            detector_seed=detector_seed,
+            g=g,
+        )
+        return (m["macro_f1"], m["per_stream_f1"], cand, ec, m)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+def _compute_complementarity_score(
+    candidate_per_stream_f1: List[float],
+    current_per_stream_f1: List[float],
+) -> float:
+    """Compute complementarity score based on weak-stream boost.
     
-    trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
-    g = GlobalConfig(
-        detector_decision_criteria=base_global.detector_decision_criteria,
-        ensemble_decision_criteria=ec,
-        decision_window=base_global.decision_window,
-        suppression_window=base_global.suppression_window,
-        recent_samples_size=base_global.recent_samples_size,
-    )
-    m = evaluate_ensemble(
-        generators=generators,
-        drift_frequencies=drift_frequencies,
-        stream_length=stream_length,
-        stream_seeds=stream_seeds,
-        tolerances=tolerances,
-        indices=train_indices,
-        slot_specs=trial_specs,
-        detector_seed=detector_seed,
-        g=g,
-    )
-    return (m["macro_f1"], cand, ec, m)
+    For each stream, weight the improvement by how weak the current ensemble is.
+    Streams where current ensemble is weak get higher weight.
+    """
+    score = 0.0
+    for cand_f1, curr_f1 in zip(candidate_per_stream_f1, current_per_stream_f1):
+        # Improvement on this stream
+        improvement = cand_f1 - curr_f1
+        # Weight by inverse of current performance (weaker streams get higher weight)
+        # Add epsilon to avoid division by zero
+        weight = 1.0 / (curr_f1 + 1e-6)
+        score += improvement * weight
+    return score
 
 
 def greedy_select(*, pool: List[PoolEntry],
@@ -356,10 +381,13 @@ def greedy_select(*, pool: List[PoolEntry],
                   detector_seed: int,
                   max_n: int,
                   stop_on_no_improve: bool,
-                  n_workers: int = 1):
+                  n_workers: int = 1,
+                  selection_strategy: str = "complementarity"):
     history: List[Dict[str, object]] = []
     ensemble: List[PoolEntry] = []
     current_train = 0.0
+    current_eval = 0.0
+    current_train_per_stream = [0.0] * len(train_indices)
 
     ens_crits = ENS_CRITS if inner_search_ens_crit else (base_global.ensemble_decision_criteria,)
     use_mp = n_workers > 1
@@ -382,17 +410,25 @@ def greedy_select(*, pool: List[PoolEntry],
                     stream_seeds, tolerances, train_indices, detector_seed
                 ))
 
+        logger.info("Step %d: use_mp=%s, n_workers=%d, tasks=%d", step, use_mp, n_workers, len(tasks))
+        
         if use_mp and tasks:
             # Parallel evaluation
-            ctx = mp.get_context("spawn")
+            logger.info("Step %d: evaluating %d candidates with %d workers", step, len(tasks), n_workers)
+            ctx = mp.get_context("fork")
             with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
                 results = pool_mp.map(_evaluate_candidate_task, tasks)
-            for macro_f1, cand, ec, m in results:
-                if macro_f1 > best_train_macro:
-                    best_train_macro = macro_f1
+            for macro_f1, per_stream_f1, cand, ec, m in results:
+                if selection_strategy == "complementarity":
+                    score = _compute_complementarity_score(per_stream_f1, current_train_per_stream)
+                else:  # macro_f1
+                    score = macro_f1
+                if score > best_train_macro:
+                    best_train_macro = score
                     best_candidate = cand
                     best_ens_crit = ec
                     best_train_metrics = m
+            logger.info("Step %d: best train score = %.4f", step, best_train_macro)
         else:
             # Sequential evaluation (original behavior)
             for cand in pool:
@@ -418,8 +454,12 @@ def greedy_select(*, pool: List[PoolEntry],
                         detector_seed=detector_seed,
                         g=g,
                     )
-                    if m["macro_f1"] > best_train_macro:
-                        best_train_macro = m["macro_f1"]
+                    if selection_strategy == "complementarity":
+                        score = _compute_complementarity_score(m["per_stream_f1"], current_train_per_stream)
+                    else:  # macro_f1
+                        score = m["macro_f1"]
+                    if score > best_train_macro:
+                        best_train_macro = score
                         best_candidate = cand
                         best_ens_crit = ec
                         best_train_metrics = m
@@ -455,7 +495,12 @@ def greedy_select(*, pool: List[PoolEntry],
             detector_seed=detector_seed,
             g=g_final,
         )
-        current_train = best_train_macro
+        current_train = best_train_metrics["macro_f1"]
+        current_train_per_stream = best_train_metrics["per_stream_f1"]
+        current_eval = eval_metrics["macro_f1"]
+        train_delta = current_train - (history[-1]["train_macro_f1"] if history else 0.0)
+        eval_delta = current_eval - (history[-1]["eval_macro_f1"] if history else 0.0)
+        
         record = {
             "step": step,
             "n": len(ensemble),
@@ -468,16 +513,18 @@ def greedy_select(*, pool: List[PoolEntry],
             "suppression_window": base_global.suppression_window,
             "recent_samples_size": base_global.recent_samples_size,
             "train_macro_f1": best_train_macro,
+            "train_delta": train_delta,
             "train_per_stream_f1": best_train_metrics["per_stream_f1"],
             "eval_macro_f1": eval_metrics["macro_f1"],
+            "eval_delta": eval_delta,
             "eval_per_stream_f1": eval_metrics["per_stream_f1"],
             "members": [{"kind": e.kind, "source": e.source} for e in ensemble],
         }
         history.append(record)
         logger.info(
-            "step=%d N=%d +%s  train_macroF1=%.4f  eval_macroF1=%.4f  ens=%s",
+            "step=%d N=%d +%s  train_macroF1=%.4f (%+.4f)  eval_macroF1=%.4f (%+.4f)  ens=%s",
             step, len(ensemble), best_candidate.kind,
-            best_train_macro, eval_metrics["macro_f1"], best_ens_crit,
+            best_train_macro, train_delta, eval_metrics["macro_f1"], eval_delta, best_ens_crit,
         )
 
     return history
@@ -584,6 +631,10 @@ def main():
     ap.add_argument("--n-workers", type=int, default=1,
                     help="Number of parallel workers for candidate evaluation. "
                          "Default 1 (sequential). Use >1 to speed up greedy selection.")
+    ap.add_argument("--selection-strategy", default="complementarity",
+                    choices=["complementarity", "macro_f1"],
+                    help="Strategy for selecting candidates: 'complementarity' "
+                         "(boost weak streams, default) or 'macro_f1' (maximize average).")
     # Anchors for global params (det_crit, decision_window, ...). 'best' means
     # inherit from the top-1 pool entry; otherwise override explicitly.
     ap.add_argument("--globals", default="best",
@@ -714,6 +765,7 @@ def main():
     print(f"  decision_window     : {base_global.decision_window}")
     print(f"  suppression_window  : {base_global.suppression_window}")
     print(f"  recent_samples_size : {base_global.recent_samples_size}")
+    print(f"  selection_strategy  : {args.selection_strategy}")
     print("=" * 80, flush=True)
 
     history = greedy_select(
@@ -731,6 +783,7 @@ def main():
         max_n=args.max_n,
         stop_on_no_improve=args.stop_on_no_improve,
         n_workers=args.n_workers,
+        selection_strategy=args.selection_strategy,
     )
 
     write_history_csv(args.output_csv, history)
