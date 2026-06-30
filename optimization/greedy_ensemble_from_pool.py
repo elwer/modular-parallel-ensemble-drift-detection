@@ -520,7 +520,10 @@ def greedy_select(*, pool: List[PoolEntry],
 
         logger.info("Step %d: use_mp=%s, n_workers=%d, tasks=%d", step, use_mp, n_workers, len(tasks))
         
-        if use_mp and tasks:
+        # Skip evaluation if Step 1 already selected candidate from pool
+        if step == 1 and not ensemble and best_candidate is not None:
+            logger.info("Step 1: Skipping evaluation (candidate selected from pool)")
+        elif use_mp and tasks:
             # Parallel evaluation
             logger.info("Step %d: evaluating %d candidates with %d workers", step, len(tasks), n_workers)
             try:
