@@ -284,6 +284,8 @@ def evaluate_ensemble(*, generators: List[str],
     from detectors.mopedds.threads_deployment import ThreadsDeployment
     from optimization.synthetic_f1_multistream_optimize_optuna import build_stream, _f1_from_counts
     
+    logger.info(f"evaluate_ensemble: slot_specs={slot_specs}, indices={indices}, g={g}")
+    
     per_f1: List[float] = []
     tp_total = fp_total = fn_total = 0
     
@@ -306,6 +308,7 @@ def evaluate_ensemble(*, generators: List[str],
         # Add member detectors
         for i, (kind, params) in enumerate(slot_specs):
             from optimization.synthetic_f1_multistream_optimize_optuna import get_detector_class, CLASS_PATH
+            logger.debug(f"Adding detector {i}: kind={kind}, params={params}")
             cls = get_detector_class(CLASS_PATH[kind])
             full_params = dict(params)
             full_params.setdefault("seed", detector_seed + i + 1000 * s_idx)
