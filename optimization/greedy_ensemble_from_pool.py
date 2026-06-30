@@ -397,6 +397,7 @@ def greedy_select(*, pool: List[PoolEntry],
         best_candidate: Optional[PoolEntry] = None
         best_ens_crit: Optional[str] = base_global.ensemble_decision_criteria
         best_train_metrics: Optional[Dict[str, object]] = None
+        best_selection_score = -math.inf
         best_train_macro = -math.inf
 
         # Build task list for this step (convert to primitive types for pickling)
@@ -442,8 +443,9 @@ def greedy_select(*, pool: List[PoolEntry],
                         score = _compute_complementarity_score(per_stream_f1, current_train_per_stream)
                     else:  # macro_f1
                         score = macro_f1
-                    if score > best_train_macro:
-                        best_train_macro = score
+                    if score > best_selection_score:
+                        best_selection_score = score
+                        best_train_macro = macro_f1  # Store actual macro F1 for logging
                         best_candidate = cand
                         best_ens_crit = ec
                         best_train_metrics = m
@@ -481,8 +483,9 @@ def greedy_select(*, pool: List[PoolEntry],
                         score = _compute_complementarity_score(m["per_stream_f1"], current_train_per_stream)
                     else:  # macro_f1
                         score = m["macro_f1"]
-                    if score > best_train_macro:
-                        best_train_macro = score
+                    if score > best_selection_score:
+                        best_selection_score = score
+                        best_train_macro = m["macro_f1"]  # Store actual macro F1 for logging
                         best_candidate = cand
                         best_ens_crit = ec
                         best_train_metrics = m
@@ -768,6 +771,48 @@ def main():
         suppression_window=int(suppression_window),
         recent_samples_size=int(recent_samples_size),
     )
+
+    # Check if Optuna evaluation file exists; if not, recompute baseline eval
+    # The Optuna script writes to <OUT_DIR>/<TAG>/synthF1ms_<TAG>_N1_S<N>_eval.csv
+    tag_dir = os.path.dirname(args.output_csv)
+    optuna_eval_path = os.path.join(tag_dir, f"synthF1ms_{study_tag}_N1_S{args.n_streams}_eval.csv")
+    if not os.path.exists(optuna_eval_path):
+        logger.warning("Optuna evaluation file not found at %s. Recomputing baseline eval.", optuna_eval_path)
+        # Evaluate the best pool entry on held-out streams
+        best_pool = pool[0]
+        trial_specs = [(best_pool.kind, best_pool.params)]
+        eval_metrics = evaluate_ensemble(
+            generators=generators_list,
+            drift_frequencies=drift_frequencies,
+            stream_length=args.stream_length,
+            stream_seeds=stream_seeds,
+            tolerances=tolerances,
+            indices=eval_indices,
+            slot_specs=trial_specs,
+            detector_seed=args.seed,
+            g=base_global,
+        )
+        # Write the evaluation file
+        import csv as csv_module
+        with open(optuna_eval_path, "w", newline="") as f:
+            writer = csv_module.DictWriter(f, fieldnames=[
+                "kind", "params", "detector_decision_criteria", "ensemble_decision_criteria",
+                "decision_window", "suppression_window", "recent_samples_size",
+                "eval_macro_f1", "eval_per_stream_f1"
+            ])
+            writer.writeheader()
+            writer.writerow({
+                "kind": best_pool.kind,
+                "params": str(best_pool.params),
+                "detector_decision_criteria": base_global.detector_decision_criteria,
+                "ensemble_decision_criteria": base_global.ensemble_decision_criteria,
+                "decision_window": base_global.decision_window,
+                "suppression_window": base_global.suppression_window,
+                "recent_samples_size": base_global.recent_samples_size,
+                "eval_macro_f1": eval_metrics["macro_f1"],
+                "eval_per_stream_f1": str(eval_metrics["per_stream_f1"]),
+            })
+        logger.info("Wrote baseline evaluation to %s", optuna_eval_path)
 
     print("=" * 80)
     print("Greedy ensemble from pool")
