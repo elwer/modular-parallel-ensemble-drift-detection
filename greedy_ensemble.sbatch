@@ -76,8 +76,6 @@ if [[ -n "${PIN_GLOBALS:-}" ]]; then
 fi
 if [[ -n "${N_WORKERS:-}" ]]; then
     EXTRA_ARGS+=(--n-workers "${N_WORKERS}")
-else
-    EXTRA_ARGS+=(--n-workers 1)
 fi
 if [[ -n "${SELECTION_STRATEGY:-}" ]]; then
     EXTRA_ARGS+=(--selection-strategy "${SELECTION_STRATEGY}")

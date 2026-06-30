@@ -313,22 +313,23 @@ def evaluate_ensemble(*, generators: List[str],
 ENS_CRITS = ("any", "majority", "all")
 
 
-def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], PoolEntry, str, Dict[str, object]]:
+def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], Dict, str, Dict[str, object]]:
     """Worker function for parallel candidate evaluation.
     
-    Returns: (macro_f1, per_stream_f1, candidate, ens_crit, metrics)
+    Args are primitive types only (no complex objects) for reliable pickling.
+    Returns: (macro_f1, per_stream_f1, candidate_dict, ens_crit, metrics)
     """
     try:
-        (cand, ensemble, ec, base_global, generators, drift_frequencies,
+        (cand_dict, ensemble_dicts, ec, base_global_dict, generators, drift_frequencies,
          stream_length, stream_seeds, tolerances, train_indices, detector_seed) = args_tuple
         
-        trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
+        trial_specs = [(e["kind"], e["params"]) for e in ensemble_dicts] + [(cand_dict["kind"], cand_dict["params"])]
         g = GlobalConfig(
-            detector_decision_criteria=base_global.detector_decision_criteria,
+            detector_decision_criteria=base_global_dict["detector_decision_criteria"],
             ensemble_decision_criteria=ec,
-            decision_window=base_global.decision_window,
-            suppression_window=base_global.suppression_window,
-            recent_samples_size=base_global.recent_samples_size,
+            decision_window=base_global_dict["decision_window"],
+            suppression_window=base_global_dict["suppression_window"],
+            recent_samples_size=base_global_dict["recent_samples_size"],
         )
         m = evaluate_ensemble(
             generators=generators,
@@ -341,7 +342,7 @@ def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], Poo
             detector_seed=detector_seed,
             g=g,
         )
-        return (m["macro_f1"], m["per_stream_f1"], cand, ec, m)
+        return (m["macro_f1"], m["per_stream_f1"], cand_dict, ec, m)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -398,14 +399,24 @@ def greedy_select(*, pool: List[PoolEntry],
         best_train_metrics: Optional[Dict[str, object]] = None
         best_train_macro = -math.inf
 
-        # Build task list for this step
+        # Build task list for this step (convert to primitive types for pickling)
+        base_global_dict = {
+            "detector_decision_criteria": base_global.detector_decision_criteria,
+            "ensemble_decision_criteria": base_global.ensemble_decision_criteria,
+            "decision_window": base_global.decision_window,
+            "suppression_window": base_global.suppression_window,
+            "recent_samples_size": base_global.recent_samples_size,
+        }
+        ensemble_dicts = [{"kind": e.kind, "params": e.params} for e in ensemble]
+        
         tasks = []
         for cand in pool:
             if any(cand is e for e in ensemble):
                 continue
+            cand_dict = {"kind": cand.kind, "params": cand.params, "source": cand.source, "macro_f1": cand.macro_f1}
             for ec in ens_crits:
                 tasks.append((
-                    cand, ensemble, ec, base_global,
+                    cand_dict, ensemble_dicts, ec, base_global_dict,
                     generators, drift_frequencies, stream_length,
                     stream_seeds, tolerances, train_indices, detector_seed
                 ))
@@ -419,7 +430,14 @@ def greedy_select(*, pool: List[PoolEntry],
                 ctx = mp.get_context("fork")
                 with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
                     results = pool_mp.map(_evaluate_candidate_task, tasks)
-                for macro_f1, per_stream_f1, cand, ec, m in results:
+                for macro_f1, per_stream_f1, cand_dict, ec, m in results:
+                    # Reconstruct PoolEntry from dict
+                    cand = PoolEntry(
+                        kind=cand_dict["kind"],
+                        params=cand_dict["params"],
+                        source=cand_dict["source"],
+                        macro_f1=cand_dict["macro_f1"],
+                    )
                     if selection_strategy == "complementarity":
                         score = _compute_complementarity_score(per_stream_f1, current_train_per_stream)
                     else:  # macro_f1
