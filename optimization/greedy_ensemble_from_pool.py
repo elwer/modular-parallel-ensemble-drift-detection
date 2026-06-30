@@ -299,6 +299,7 @@ def evaluate_ensemble(*, generators: List[str],
     from detectors.mopedds.threads_deployment import ThreadsDeployment
     from optimization.synthetic_f1_multistream_optimize_optuna import build_stream, _f1_from_counts
     
+    logger.info(f"evaluate_ensemble called with indices={indices}")
     per_f1: List[float] = []
     tp_total = fp_total = fn_total = 0
     
