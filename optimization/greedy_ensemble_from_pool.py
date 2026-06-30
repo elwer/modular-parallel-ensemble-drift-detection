@@ -415,20 +415,25 @@ def greedy_select(*, pool: List[PoolEntry],
         if use_mp and tasks:
             # Parallel evaluation
             logger.info("Step %d: evaluating %d candidates with %d workers", step, len(tasks), n_workers)
-            ctx = mp.get_context("fork")
-            with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
-                results = pool_mp.map(_evaluate_candidate_task, tasks)
-            for macro_f1, per_stream_f1, cand, ec, m in results:
-                if selection_strategy == "complementarity":
-                    score = _compute_complementarity_score(per_stream_f1, current_train_per_stream)
-                else:  # macro_f1
-                    score = macro_f1
-                if score > best_train_macro:
-                    best_train_macro = score
-                    best_candidate = cand
-                    best_ens_crit = ec
-                    best_train_metrics = m
-            logger.info("Step %d: best train score = %.4f", step, best_train_macro)
+            try:
+                ctx = mp.get_context("fork")
+                with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
+                    results = pool_mp.map(_evaluate_candidate_task, tasks)
+                for macro_f1, per_stream_f1, cand, ec, m in results:
+                    if selection_strategy == "complementarity":
+                        score = _compute_complementarity_score(per_stream_f1, current_train_per_stream)
+                    else:  # macro_f1
+                        score = macro_f1
+                    if score > best_train_macro:
+                        best_train_macro = score
+                        best_candidate = cand
+                        best_ens_crit = ec
+                        best_train_metrics = m
+                logger.info("Step %d: best train score = %.4f", step, best_train_macro)
+            except Exception as e:
+                logger.warning("Parallel evaluation failed: %s. Falling back to sequential.", e)
+                logger.info("Step %d: falling back to sequential evaluation", step)
+                use_mp = False
         else:
             # Sequential evaluation (original behavior)
             for cand in pool:
