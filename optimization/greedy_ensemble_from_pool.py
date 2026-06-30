@@ -505,7 +505,9 @@ def greedy_select(*, pool: List[PoolEntry],
             for cand in pool:
                 if any(cand is e for e in ensemble):
                     continue
+                logger.info(f"Evaluating candidate: kind={cand.kind}, params={cand.params}")
                 trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
+                logger.info(f"trial_specs={trial_specs}")
                 for ec in ens_crits:
                     g = GlobalConfig(
                         detector_decision_criteria=base_global.detector_decision_criteria,
