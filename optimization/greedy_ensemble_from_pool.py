@@ -427,9 +427,9 @@ def greedy_select(*, pool: List[PoolEntry],
             # Parallel evaluation
             logger.info("Step %d: evaluating %d candidates with %d workers", step, len(tasks), n_workers)
             try:
-                ctx = mp.get_context("fork")
+                ctx = mp.get_context("spawn")
                 with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
-                    results = pool_mp.map(_evaluate_candidate_task, tasks)
+                    results = pool_mp.map(_evaluate_candidate_task, tasks, chunksize=1)
                 for macro_f1, per_stream_f1, cand_dict, ec, m in results:
                     # Reconstruct PoolEntry from dict
                     cand = PoolEntry(
