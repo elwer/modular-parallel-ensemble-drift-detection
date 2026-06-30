@@ -84,6 +84,7 @@ class PoolEntry:
     kind: str                    # detector class short name (CANDIDATES)
     params: Dict[str, object]    # detector-specific hyperparameters
     macro_f1: float              # macro F1 reported for this trial (N=1)
+    per_stream_f1: Optional[List[float]] = None  # per-stream F1 for complementarity
     # global params from the trial (kept as defaults if --globals=inherit-best)
     detector_decision_criteria: Optional[str] = None
     decision_window: Optional[int] = None
@@ -172,11 +173,22 @@ def _row_to_pool_entry(row: Dict[str, str], source: str) -> Optional[PoolEntry]:
     # Reject entries with empty params
     if not params:
         return None
+    
+    # Parse per_stream_f1 if available
+    per_stream_f1 = None
+    per_stream_str = row.get("per_stream_f1", "")
+    if per_stream_str:
+        try:
+            per_stream_f1 = [float(x.strip()) for x in per_stream_str.strip("[]").split(",") if x.strip()]
+        except (ValueError, AttributeError):
+            per_stream_f1 = None
+    
     return PoolEntry(
         source=source,
         kind=kind,
         params=params,
         macro_f1=float(macro),
+        per_stream_f1=per_stream_f1,
         detector_decision_criteria=(row.get("detector_decision_criteria") or None),
         decision_window=_safe_int(row.get("decision_window")),
         suppression_window=_safe_int(row.get("suppression_window")),
@@ -458,27 +470,52 @@ def greedy_select(*, pool: List[PoolEntry],
         best_selection_score = -math.inf
         best_train_macro = -math.inf
 
-        # Build task list for this step (convert to primitive types for pickling)
-        base_global_dict = {
-            "detector_decision_criteria": base_global.detector_decision_criteria,
-            "ensemble_decision_criteria": base_global.ensemble_decision_criteria,
-            "decision_window": base_global.decision_window,
-            "suppression_window": base_global.suppression_window,
-            "recent_samples_size": base_global.recent_samples_size,
-        }
-        ensemble_dicts = [{"kind": e.kind, "params": e.params} for e in ensemble]
-        
-        tasks = []
-        for cand in pool:
-            if any(cand is e for e in ensemble):
-                continue
-            cand_dict = {"kind": cand.kind, "params": cand.params, "source": cand.source, "macro_f1": cand.macro_f1}
-            for ec in ens_crits:
-                tasks.append((
-                    cand_dict, ensemble_dicts, ec, base_global_dict,
-                    generators, drift_frequencies, stream_length,
-                    stream_seeds, tolerances, train_indices, detector_seed
-                ))
+        # Step 1: Skip re-evaluation, use Optuna scores from pool
+        if step == 1 and not ensemble:
+            logger.info("Step 1: Selecting best detector from pool (using Optuna scores)")
+            for cand in pool:
+                if selection_strategy == "complementarity":
+                    # For complementarity, we need per-stream F1 from pool entry
+                    if hasattr(cand, 'per_stream_f1') and cand.per_stream_f1:
+                        score = _compute_complementarity_score(cand.per_stream_f1, current_train_per_stream)
+                    else:
+                        # Fallback to macro F1 if per-stream not available
+                        score = cand.macro_f1
+                else:  # macro_f1
+                    score = cand.macro_f1
+                if score > best_selection_score:
+                    best_selection_score = score
+                    best_train_macro = cand.macro_f1
+                    best_candidate = cand
+                    best_ens_crit = base_global.ensemble_decision_criteria
+                    best_train_metrics = {
+                        "macro_f1": cand.macro_f1,
+                        "per_stream_f1": getattr(cand, 'per_stream_f1', [cand.macro_f1] * len(train_indices)),
+                    }
+            logger.info("Step 1: selected %s with Optuna score %.4f", best_candidate.kind, best_train_macro)
+        else:
+            # Steps 2+: Re-evaluate candidates with current ensemble
+            # Build task list for this step (convert to primitive types for pickling)
+            base_global_dict = {
+                "detector_decision_criteria": base_global.detector_decision_criteria,
+                "ensemble_decision_criteria": base_global.ensemble_decision_criteria,
+                "decision_window": base_global.decision_window,
+                "suppression_window": base_global.suppression_window,
+                "recent_samples_size": base_global.recent_samples_size,
+            }
+            ensemble_dicts = [{"kind": e.kind, "params": e.params} for e in ensemble]
+            
+            tasks = []
+            for cand in pool:
+                if any(cand is e for e in ensemble):
+                    continue
+                cand_dict = {"kind": cand.kind, "params": cand.params, "source": cand.source, "macro_f1": cand.macro_f1}
+                for ec in ens_crits:
+                    tasks.append((
+                        cand_dict, ensemble_dicts, ec, base_global_dict,
+                        generators, drift_frequencies, stream_length,
+                        stream_seeds, tolerances, train_indices, detector_seed
+                    ))
 
         logger.info("Step %d: use_mp=%s, n_workers=%d, tasks=%d", step, use_mp, n_workers, len(tasks))
         
