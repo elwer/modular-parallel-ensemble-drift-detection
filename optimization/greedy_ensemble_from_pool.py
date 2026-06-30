@@ -418,38 +418,37 @@ def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], Dic
     Args are primitive types only (no complex objects) for reliable pickling.
     Returns: (macro_f1, per_stream_f1, candidate_dict, ens_crit, metrics)
     """
+    (cand_dict, ensemble_dicts, ec, base_global_dict, generators, drift_frequencies,
+     stream_length, stream_seeds, tolerances, train_indices, detector_seed, eval_timeout) = args_tuple
+    
+    trial_specs = [(e["kind"], e["params"]) for e in ensemble_dicts] + [(cand_dict["kind"], cand_dict["params"])]
+    g = GlobalConfig(
+        detector_decision_criteria=base_global_dict["detector_decision_criteria"],
+        ensemble_decision_criteria=ec,
+        decision_window=base_global_dict["decision_window"],
+        suppression_window=base_global_dict["suppression_window"],
+        recent_samples_size=base_global_dict["recent_samples_size"],
+    )
     try:
-        (cand_dict, ensemble_dicts, ec, base_global_dict, generators, drift_frequencies,
-         stream_length, stream_seeds, tolerances, train_indices, detector_seed) = args_tuple
-        
-        trial_specs = [(e["kind"], e["params"]) for e in ensemble_dicts] + [(cand_dict["kind"], cand_dict["params"])]
-        g = GlobalConfig(
-            detector_decision_criteria=base_global_dict["detector_decision_criteria"],
-            ensemble_decision_criteria=ec,
-            decision_window=base_global_dict["decision_window"],
-            suppression_window=base_global_dict["suppression_window"],
-            recent_samples_size=base_global_dict["recent_samples_size"],
+        m = with_timeout(evaluate_ensemble, eval_timeout,
+            generators=generators,
+            drift_frequencies=drift_frequencies,
+            stream_length=stream_length,
+            stream_seeds=stream_seeds,
+            tolerances=tolerances,
+            indices=train_indices,
+            slot_specs=trial_specs,
+            detector_seed=detector_seed,
+            g=g,
         )
-        try:
-            m = with_timeout(evaluate_ensemble, eval_timeout,
-                generators=generators,
-                drift_frequencies=drift_frequencies,
-                stream_length=stream_length,
-                stream_seeds=stream_seeds,
-                tolerances=tolerances,
-                indices=train_indices,
-                slot_specs=trial_specs,
-                detector_seed=detector_seed,
-                g=g,
-            )
-            return (m["macro_f1"], m["per_stream_f1"], cand_dict, ec, m)
-        except TimeoutError:
-            logger.warning(f"Evaluation timed out after {eval_timeout}s, returning worst score")
-            return (0.0, [0.0] * len(train_indices), cand_dict, ec, {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)})
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            raise
+        return (m["macro_f1"], m["per_stream_f1"], cand_dict, ec, m)
+    except TimeoutError:
+        logger.warning(f"Evaluation timed out after {eval_timeout}s, returning worst score")
+        return (0.0, [0.0] * len(train_indices), cand_dict, ec, {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 def _compute_complementarity_score(
@@ -548,7 +547,7 @@ def greedy_select(*, pool: List[PoolEntry],
                     tasks.append((
                         cand_dict, ensemble_dicts, ec, base_global_dict,
                         generators, drift_frequencies, stream_length,
-                        stream_seeds, tolerances, train_indices, detector_seed
+                        stream_seeds, tolerances, train_indices, detector_seed, eval_timeout
                     ))
 
         logger.info("Step %d: use_mp=%s, n_workers=%d, tasks=%d", step, use_mp, n_workers, len(tasks))
