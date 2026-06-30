@@ -347,7 +347,7 @@ def evaluate_ensemble(*, generators: List[str],
             if result:
                 detections.append(sample_count - 1)  # Store sample index, not x
         
-        logger.info(f"Stream {s_idx}: samples={sample_count}, known drifts={len(known)}, MOPEDDS detections={len(detections)}")
+        logger.info(f"Stream {s_idx} (idx {indices.index(s_idx) if s_idx in indices else '?'}): samples={sample_count}, known drifts={len(known)}, MOPEDDS detections={len(detections)}")
         if len(detections) == 0:
             logger.warning(f"Stream {s_idx}: MOPEDDS detected NO drifts! ensemble_crit={g.ensemble_decision_criteria}, det_crit={g.detector_decision_criteria}, decision_window={g.decision_window}")
             # Check if individual detectors triggered
@@ -598,6 +598,7 @@ def greedy_select(*, pool: List[PoolEntry],
 
         ensemble.append(best_candidate)
         # Evaluate the accepted ensemble on the held-out eval indices.
+        logger.info(f"Step {step}: Evaluating ensemble on eval indices {eval_indices}")
         g_final = GlobalConfig(
             detector_decision_criteria=base_global.detector_decision_criteria,
             ensemble_decision_criteria=best_ens_crit,
