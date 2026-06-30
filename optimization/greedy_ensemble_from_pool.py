@@ -231,6 +231,7 @@ def filter_pool(pool: List[PoolEntry],
     """Keep the top-K configs overall and the top-K per detector type to
     guarantee that every type is representable in the greedy candidate set."""
     by_score = sorted(pool, key=lambda e: e.macro_f1, reverse=True)
+    logger.info(f"filter_pool: top 5 by_score: {[f'{e.kind}({e.macro_f1:.4f})' for e in by_score[:5]]}")
     keep: List[PoolEntry] = []
     seen_ids: set = set()
 
@@ -239,6 +240,7 @@ def filter_pool(pool: List[PoolEntry],
 
     if top_k_overall > 0:
         for e in by_score[:top_k_overall]:
+            logger.info(f"filter_pool top_k_overall: kind={e.kind}, params={e.params}, macro_f1={e.macro_f1}")
             if _id(e) not in seen_ids:
                 keep.append(e)
                 seen_ids.add(_id(e))
@@ -250,10 +252,12 @@ def filter_pool(pool: List[PoolEntry],
                 per_type[e.kind].append(e)
         for kind in CANDIDATES:
             for e in per_type[kind]:
+                logger.info(f"filter_pool top_k_per_type: kind={e.kind}, params={e.params}, macro_f1={e.macro_f1}")
                 if _id(e) not in seen_ids:
                     keep.append(e)
                     seen_ids.add(_id(e))
 
+    logger.info(f"filter_pool: kept {len(keep)} entries")
     return keep
 
 
