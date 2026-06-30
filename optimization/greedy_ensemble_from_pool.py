@@ -47,6 +47,7 @@ import json
 import glob
 import math
 import logging
+import multiprocessing as mp
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -312,6 +313,36 @@ def evaluate_ensemble(*, generators: List[str],
 ENS_CRITS = ("any", "majority", "all")
 
 
+def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, PoolEntry, str, Dict[str, object]]:
+    """Worker function for parallel candidate evaluation.
+    
+    Returns: (macro_f1, candidate, ens_crit, metrics)
+    """
+    (cand, ensemble, ec, base_global, generators, drift_frequencies,
+     stream_length, stream_seeds, tolerances, train_indices, detector_seed) = args_tuple
+    
+    trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
+    g = GlobalConfig(
+        detector_decision_criteria=base_global.detector_decision_criteria,
+        ensemble_decision_criteria=ec,
+        decision_window=base_global.decision_window,
+        suppression_window=base_global.suppression_window,
+        recent_samples_size=base_global.recent_samples_size,
+    )
+    m = evaluate_ensemble(
+        generators=generators,
+        drift_frequencies=drift_frequencies,
+        stream_length=stream_length,
+        stream_seeds=stream_seeds,
+        tolerances=tolerances,
+        indices=train_indices,
+        slot_specs=trial_specs,
+        detector_seed=detector_seed,
+        g=g,
+    )
+    return (m["macro_f1"], cand, ec, m)
+
+
 def greedy_select(*, pool: List[PoolEntry],
                   generators: List[str],
                   drift_frequencies: List[int],
@@ -324,12 +355,14 @@ def greedy_select(*, pool: List[PoolEntry],
                   inner_search_ens_crit: bool,
                   detector_seed: int,
                   max_n: int,
-                  stop_on_no_improve: bool):
+                  stop_on_no_improve: bool,
+                  n_workers: int = 1):
     history: List[Dict[str, object]] = []
     ensemble: List[PoolEntry] = []
     current_train = 0.0
 
     ens_crits = ENS_CRITS if inner_search_ens_crit else (base_global.ensemble_decision_criteria,)
+    use_mp = n_workers > 1
 
     for step in range(1, max_n + 1):
         best_candidate: Optional[PoolEntry] = None
@@ -337,34 +370,59 @@ def greedy_select(*, pool: List[PoolEntry],
         best_train_metrics: Optional[Dict[str, object]] = None
         best_train_macro = -math.inf
 
+        # Build task list for this step
+        tasks = []
         for cand in pool:
             if any(cand is e for e in ensemble):
                 continue
-            trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
             for ec in ens_crits:
-                g = GlobalConfig(
-                    detector_decision_criteria=base_global.detector_decision_criteria,
-                    ensemble_decision_criteria=ec,
-                    decision_window=base_global.decision_window,
-                    suppression_window=base_global.suppression_window,
-                    recent_samples_size=base_global.recent_samples_size,
-                )
-                m = evaluate_ensemble(
-                    generators=generators,
-                    drift_frequencies=drift_frequencies,
-                    stream_length=stream_length,
-                    stream_seeds=stream_seeds,
-                    tolerances=tolerances,
-                    indices=train_indices,
-                    slot_specs=trial_specs,
-                    detector_seed=detector_seed,
-                    g=g,
-                )
-                if m["macro_f1"] > best_train_macro:
-                    best_train_macro = m["macro_f1"]
+                tasks.append((
+                    cand, ensemble, ec, base_global,
+                    generators, drift_frequencies, stream_length,
+                    stream_seeds, tolerances, train_indices, detector_seed
+                ))
+
+        if use_mp and tasks:
+            # Parallel evaluation
+            ctx = mp.get_context("spawn")
+            with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
+                results = pool_mp.map(_evaluate_candidate_task, tasks)
+            for macro_f1, cand, ec, m in results:
+                if macro_f1 > best_train_macro:
+                    best_train_macro = macro_f1
                     best_candidate = cand
                     best_ens_crit = ec
                     best_train_metrics = m
+        else:
+            # Sequential evaluation (original behavior)
+            for cand in pool:
+                if any(cand is e for e in ensemble):
+                    continue
+                trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
+                for ec in ens_crits:
+                    g = GlobalConfig(
+                        detector_decision_criteria=base_global.detector_decision_criteria,
+                        ensemble_decision_criteria=ec,
+                        decision_window=base_global.decision_window,
+                        suppression_window=base_global.suppression_window,
+                        recent_samples_size=base_global.recent_samples_size,
+                    )
+                    m = evaluate_ensemble(
+                        generators=generators,
+                        drift_frequencies=drift_frequencies,
+                        stream_length=stream_length,
+                        stream_seeds=stream_seeds,
+                        tolerances=tolerances,
+                        indices=train_indices,
+                        slot_specs=trial_specs,
+                        detector_seed=detector_seed,
+                        g=g,
+                    )
+                    if m["macro_f1"] > best_train_macro:
+                        best_train_macro = m["macro_f1"]
+                        best_candidate = cand
+                        best_ens_crit = ec
+                        best_train_metrics = m
 
         if best_candidate is None:
             logger.warning("No candidate available; stopping at N=%d", len(ensemble))
@@ -523,6 +581,9 @@ def main():
                     help="At each greedy step also pick the best "
                          "ensemble_decision_criteria in {any, majority, all}.")
     ap.add_argument("--stop-on-no-improve", action="store_true")
+    ap.add_argument("--n-workers", type=int, default=1,
+                    help="Number of parallel workers for candidate evaluation. "
+                         "Default 1 (sequential). Use >1 to speed up greedy selection.")
     # Anchors for global params (det_crit, decision_window, ...). 'best' means
     # inherit from the top-1 pool entry; otherwise override explicitly.
     ap.add_argument("--globals", default="best",
@@ -669,6 +730,7 @@ def main():
         detector_seed=args.seed,
         max_n=args.max_n,
         stop_on_no_improve=args.stop_on_no_improve,
+        n_workers=args.n_workers,
     )
 
     write_history_csv(args.output_csv, history)

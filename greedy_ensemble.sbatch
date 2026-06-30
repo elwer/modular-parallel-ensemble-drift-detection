@@ -34,7 +34,7 @@
 
 set -euo pipefail
 
-cd /data/horse/ws/s4122485-parallelDD/modular-parallel-ensemble-drift-detection
+cd "${SLURM_SUBMIT_DIR:-/data/horse/ws/s4122485-parallelDD/new/modular-parallel-ensemble-drift-detection}"
 source setup.sh
 
 export OMP_NUM_THREADS=1
@@ -73,6 +73,9 @@ if [[ "${STOP_ON_NO_IMPROVE:-0}" == "1" ]]; then
 fi
 if [[ -n "${PIN_GLOBALS:-}" ]]; then
     EXTRA_ARGS+=(--pin-globals "${PIN_GLOBALS}")
+fi
+if [[ -n "${N_WORKERS:-}" ]]; then
+    EXTRA_ARGS+=(--n-workers "${N_WORKERS}")
 fi
 
 python optimization/greedy_ensemble_from_pool.py \

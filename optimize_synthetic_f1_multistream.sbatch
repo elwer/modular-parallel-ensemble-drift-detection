@@ -33,7 +33,7 @@
 
 set -euo pipefail
 
-cd /data/horse/ws/s4122485-parallelDD/modular-parallel-ensemble-drift-detection
+cd "${SLURM_SUBMIT_DIR:-/data/horse/ws/s4122485-parallelDD/new/modular-parallel-ensemble-drift-detection}"
 source setup.sh
 
 export OMP_NUM_THREADS=1
