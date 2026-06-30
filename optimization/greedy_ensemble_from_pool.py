@@ -234,7 +234,6 @@ def filter_pool(pool: List[PoolEntry],
     """Keep the top-K configs overall and the top-K per detector type to
     guarantee that every type is representable in the greedy candidate set."""
     by_score = sorted(pool, key=lambda e: e.macro_f1, reverse=True)
-    logger.info(f"filter_pool: top 5 by_score: {[f'{e.kind}({e.macro_f1:.4f})' for e in by_score[:5]]}")
     keep: List[PoolEntry] = []
     seen_ids: set = set()
 
@@ -243,7 +242,6 @@ def filter_pool(pool: List[PoolEntry],
 
     if top_k_overall > 0:
         for e in by_score[:top_k_overall]:
-            logger.info(f"filter_pool top_k_overall: kind={e.kind}, params={e.params}, macro_f1={e.macro_f1}")
             if _id(e) not in seen_ids:
                 keep.append(e)
                 seen_ids.add(_id(e))
@@ -255,12 +253,10 @@ def filter_pool(pool: List[PoolEntry],
                 per_type[e.kind].append(e)
         for kind in CANDIDATES:
             for e in per_type[kind]:
-                logger.info(f"filter_pool top_k_per_type: kind={e.kind}, params={e.params}, macro_f1={e.macro_f1}")
                 if _id(e) not in seen_ids:
                     keep.append(e)
                     seen_ids.add(_id(e))
 
-    logger.info(f"filter_pool: kept {len(keep)} entries")
     return keep
 
 
@@ -291,8 +287,6 @@ def evaluate_ensemble(*, generators: List[str],
     from detectors.mopedds.threads_deployment import ThreadsDeployment
     from optimization.synthetic_f1_multistream_optimize_optuna import build_stream, _f1_from_counts
     
-    logger.info(f"evaluate_ensemble: slot_specs={slot_specs}, indices={indices}, g={g}")
-    
     per_f1: List[float] = []
     tp_total = fp_total = fn_total = 0
     
@@ -315,7 +309,6 @@ def evaluate_ensemble(*, generators: List[str],
         # Add member detectors
         for i, (kind, params) in enumerate(slot_specs):
             from optimization.synthetic_f1_multistream_optimize_optuna import get_detector_class, CLASS_PATH
-            logger.debug(f"Adding detector {i}: kind={kind}, params={params}")
             cls = get_detector_class(CLASS_PATH[kind])
             full_params = dict(params)
             full_params.setdefault("seed", detector_seed + i + 1000 * s_idx)
@@ -512,9 +505,7 @@ def greedy_select(*, pool: List[PoolEntry],
             for cand in pool:
                 if any(cand is e for e in ensemble):
                     continue
-                logger.info(f"Evaluating candidate: kind={cand.kind}, params={cand.params}")
                 trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
-                logger.info(f"trial_specs={trial_specs}")
                 for ec in ens_crits:
                     g = GlobalConfig(
                         detector_decision_criteria=base_global.detector_decision_criteria,
@@ -754,20 +745,14 @@ def main():
     # Build the pool.
     csv_paths: List[str] = list(args.pool_csv)
     if args.pool_glob:
-        matched = glob.glob(args.pool_glob)
-        logger.info(f"Pool glob '{args.pool_glob}' matched {len(matched)} files")
-        csv_paths += sorted(matched)
+        csv_paths += sorted(glob.glob(args.pool_glob))
     pool: List[PoolEntry] = []
     if csv_paths:
-        logger.info(f"Loading pool from {len(csv_paths)} CSV files")
         pool += load_pool_from_csvs(csv_paths)
     if args.optuna_storage:
         if not args.optuna_study:
             raise ValueError("--optuna-storage requires --optuna-study.")
         pool += load_pool_from_optuna(args.optuna_storage, args.optuna_study)
-    logger.info(f"Pool size after loading: {len(pool)}")
-    if pool:
-        logger.info(f"First pool entry: kind={pool[0].kind}, params={pool[0].params}, macro_f1={pool[0].macro_f1}")
     if not pool:
         raise ValueError("Empty pool: pass --pool-csv / --pool-glob / "
                          "--optuna-storage so the script has candidates.")

@@ -439,19 +439,40 @@ _FIXED_COLS = [
     "per_stream_n_drifts", "per_stream_mean_delay",
     "train_indices", "per_stream_tolerance", "n_train_streams",
     "error",
+    "detector_decision_criteria", "ensemble_decision_criteria",
+    "decision_window", "suppression_window", "recent_samples_size",
+    "slot0_type",
 ]
+
+# Pre-define all possible detector parameter columns to avoid race conditions in parallel runs
+_DETECTOR_PARAM_COLS = {
+    "BNDM": ["slot0_BNDM_n_samples", "slot0_BNDM_const", "slot0_BNDM_threshold", "slot0_BNDM_max_depth"],
+    "CSDDM": ["slot0_CSDDM_n_samples", "slot0_CSDDM_feature_proportion", "slot0_CSDDM_n_clusters", "slot0_CSDDM_confidence"],
+    "D3": ["slot0_D3_n_reference_samples", "slot0_D3_recent_samples_proportion", "slot0_D3_threshold"],
+    "IBDD": ["slot0_IBDD_n_samples", "slot0_IBDD_n_consecutive_deviations", "slot0_IBDD_n_permutations", "slot0_IBDD_update_interval"],
+    "OCDD": ["slot0_OCDD_n_samples", "slot0_OCDD_threshold"],
+    "SPLL": ["slot0_SPLL_n_samples", "slot0_SPLL_n_clusters", "slot0_SPLL_threshold"],
+    "UDetect": ["slot0_UDetect_n_windows", "slot0_UDetect_n_samples", "slot0_UDetect_disjoint_training_windows"],
+}
+
+# Flatten all detector param columns
+_ALL_PARAM_COLS = []
+for cols in _DETECTOR_PARAM_COLS.values():
+    _ALL_PARAM_COLS.extend(cols)
+
+# Complete fieldnames for CSV
+_ALL_FIELDNAMES = _FIXED_COLS + _ALL_PARAM_COLS
 
 
 def _csv_writer(path: str):
-    """Return a callback that appends each completed trial to ``path``."""
+    """Return a callback that appends each completed trial to ``path``.
+    
+    Uses pre-defined fieldnames to avoid race conditions in parallel runs.
+    """
     header_written = os.path.exists(path) and os.path.getsize(path) > 0
-    existing_fieldnames = None
-    if header_written:
-        with open(path, "r", newline="") as f:
-            existing_fieldnames = csv.DictReader(f).fieldnames
 
     def callback(study, trial):
-        nonlocal header_written, existing_fieldnames
+        nonlocal header_written
         if trial.state != TrialState.COMPLETE:
             return
         row = {
@@ -479,16 +500,12 @@ def _csv_writer(path: str):
             "error": trial.user_attrs.get("error", ""),
         }
         row.update(trial.params)
-        fieldnames = existing_fieldnames or list(row.keys())
-        for k in row.keys():
-            if k not in fieldnames:
-                fieldnames = list(fieldnames) + [k]
-        existing_fieldnames = fieldnames
-        for k in fieldnames:
+        # Ensure all pre-defined columns exist in row
+        for k in _ALL_FIELDNAMES:
             row.setdefault(k, "")
         mode = "a" if header_written else "w"
         with open(path, mode, newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames,
+            writer = csv.DictWriter(f, fieldnames=_ALL_FIELDNAMES,
                                     extrasaction="ignore")
             if not header_written:
                 writer.writeheader()
@@ -786,20 +803,31 @@ def _evaluate_best_on_held_out(*, best, generators: List[str],
     for k, v in params.items():
         row[f"param_{k}"] = v
 
+    # Use pre-defined fieldnames for eval CSV to avoid race conditions
+    eval_fieldnames = [
+        "kind", "params", "detector_decision_criteria", "ensemble_decision_criteria",
+        "decision_window", "suppression_window", "recent_samples_size",
+        "eval_macro_f1", "eval_per_stream_f1",
+        "train_macro_f1", "train_per_stream_f1",
+        "train_micro_f1", "eval_micro_f1",
+        "train_tp_total", "train_fp_total", "train_fn_total",
+        "eval_tp_total", "eval_fp_total", "eval_fn_total",
+        "train_per_precision", "train_per_recall", "train_per_tp", "train_per_fp", "train_per_fn",
+        "train_per_n_drifts", "train_per_mean_delay",
+        "eval_per_precision", "eval_per_recall", "eval_per_tp", "eval_per_fp", "eval_per_fn",
+        "eval_per_n_drifts", "eval_per_mean_delay",
+    ]
+    # Add param_ columns
+    for k in params.keys():
+        if f"param_{k}" not in eval_fieldnames:
+            eval_fieldnames.append(f"param_{k}")
+    
     write_header = not os.path.exists(eval_csv) or os.path.getsize(eval_csv) == 0
-    fieldnames = list(row.keys())
-    if not write_header:
-        with open(eval_csv, "r", newline="") as f:
-            existing = csv.DictReader(f).fieldnames or []
-        for k in fieldnames:
-            if k not in existing:
-                existing = list(existing) + [k]
-        fieldnames = existing
     with open(eval_csv, "a" if not write_header else "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=eval_fieldnames, extrasaction="ignore")
         if write_header:
             writer.writeheader()
-        for k in fieldnames:
+        for k in eval_fieldnames:
             row.setdefault(k, "")
         writer.writerow(row)
     print(f"Wrote held-out eval row to: {eval_csv}")
