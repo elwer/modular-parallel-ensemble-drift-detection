@@ -279,26 +279,69 @@ def evaluate_ensemble(*, generators: List[str],
                       slot_specs: List[Tuple[str, Dict[str, object]]],
                       detector_seed: int,
                       g: GlobalConfig) -> Dict[str, object]:
+    """Evaluate ensemble using MOPEDDS with threaded deployment."""
+    from detectors.mopedds.mopedds import MOPEDDS
+    from detectors.mopedds.threads_deployment import ThreadsDeployment
+    from optimization.synthetic_f1_multistream_optimize_optuna import build_stream, _f1_from_counts
+    
     per_f1: List[float] = []
     tp_total = fp_total = fn_total = 0
+    
     for s_idx in indices:
-        tp, fp, fn, _md, f1, _p, _r, _n = _run_one_stream(
-            generator_name=generators[s_idx],
-            drift_frequency=drift_frequencies[s_idx],
-            stream_length=stream_length,
-            stream_seed=stream_seeds[s_idx],
-            tolerance=tolerances[s_idx],
-            slot_specs=slot_specs,
-            detector_seed_base=detector_seed,
-            s_idx=s_idx,
-            detector_criterion=g.detector_decision_criteria,
-            ensemble_criterion=g.ensemble_decision_criteria,
+        # Build stream
+        stream = build_stream(generators[s_idx], drift_frequencies[s_idx],
+                              stream_length, stream_seeds[s_idx])
+        known = list(stream.drifts)
+        
+        # Create MOPEDDS instance with member detectors from slot_specs
+        mopedds = MOPEDDS(
+            detector_decision_criteria=g.detector_decision_criteria,
+            ensemble_decision_criteria=g.ensemble_decision_criteria,
             decision_window=g.decision_window,
             suppression_window=g.suppression_window,
+            seed=detector_seed,
             recent_samples_size=g.recent_samples_size,
         )
+        
+        # Add member detectors
+        for i, (kind, params) in enumerate(slot_specs):
+            from optimization.synthetic_f1_multistream_optimize_optuna import get_detector_class, CLASS_PATH
+            cls = get_detector_class(CLASS_PATH[kind])
+            full_params = dict(params)
+            full_params.setdefault("seed", detector_seed + i + 1000 * s_idx)
+            full_params["recent_samples_size"] = g.recent_samples_size
+            detector = cls(**full_params)
+            mopedds.detectors.append(detector)
+        
+        # Initialize threaded deployment
+        mopedds.deployment = ThreadsDeployment(
+            detectors=mopedds.detectors,
+            verbose=False,
+            mopedds=mopedds,
+            detector_decision_criteria=g.detector_decision_criteria,
+            decision_window=g.decision_window,
+        )
+        mopedds.deployment.initialize()
+        
+        # Run MOPEDDS on stream
+        detections = []
+        for x, _y in stream:
+            result = mopedds.update({"x": x})
+            if result:
+                detections.append(x)
+        
+        # Apply suppression
+        from main_synthetic import apply_suppression, evaluate_detections
+        dets = apply_suppression(detections, g.suppression_window)
+        tp, fp, fn, _mean_delay = evaluate_detections(dets, known, tolerances[s_idx])
+        f1 = _f1_from_counts(tp, fp, fn)
+        
         per_f1.append(float(f1))
         tp_total += int(tp); fp_total += int(fp); fn_total += int(fn)
+        
+        # Shutdown deployment
+        mopedds.deployment.shutdown()
+    
     macro = sum(per_f1) / len(per_f1) if per_f1 else 0.0
     micro = _f1_from_counts(tp_total, fp_total, fn_total)
     return {"macro_f1": macro, "micro_f1": micro,
@@ -548,8 +591,8 @@ def greedy_select(*, pool: List[PoolEntry],
         }
         history.append(record)
         logger.info(
-            "step=%d N=%d +%s  train_macroF1=%.4f (%+.4f)  eval_macroF1=%.4f (%+.4f)  ens=%s",
-            step, len(ensemble), best_candidate.kind,
+            "step=%d N=%d +%s params=%s  train_macroF1=%.4f (%+.4f)  eval_macroF1=%.4f (%+.4f)  ens=%s",
+            step, len(ensemble), best_candidate.kind, best_candidate.params,
             best_train_macro, train_delta, eval_metrics["macro_f1"], eval_delta, best_ens_crit,
         )
 
@@ -771,48 +814,6 @@ def main():
         suppression_window=int(suppression_window),
         recent_samples_size=int(recent_samples_size),
     )
-
-    # Check if Optuna evaluation file exists; if not, recompute baseline eval
-    # The Optuna script writes to <OUT_DIR>/<TAG>/synthF1ms_<TAG>_N1_S<N>_eval.csv
-    tag_dir = os.path.dirname(args.output_csv)
-    optuna_eval_path = os.path.join(tag_dir, f"synthF1ms_{study_tag}_N1_S{args.n_streams}_eval.csv")
-    if not os.path.exists(optuna_eval_path):
-        logger.warning("Optuna evaluation file not found at %s. Recomputing baseline eval.", optuna_eval_path)
-        # Evaluate the best pool entry on held-out streams
-        best_pool = pool[0]
-        trial_specs = [(best_pool.kind, best_pool.params)]
-        eval_metrics = evaluate_ensemble(
-            generators=generators_list,
-            drift_frequencies=drift_frequencies,
-            stream_length=args.stream_length,
-            stream_seeds=stream_seeds,
-            tolerances=tolerances,
-            indices=eval_indices,
-            slot_specs=trial_specs,
-            detector_seed=args.seed,
-            g=base_global,
-        )
-        # Write the evaluation file
-        import csv as csv_module
-        with open(optuna_eval_path, "w", newline="") as f:
-            writer = csv_module.DictWriter(f, fieldnames=[
-                "kind", "params", "detector_decision_criteria", "ensemble_decision_criteria",
-                "decision_window", "suppression_window", "recent_samples_size",
-                "eval_macro_f1", "eval_per_stream_f1"
-            ])
-            writer.writeheader()
-            writer.writerow({
-                "kind": best_pool.kind,
-                "params": str(best_pool.params),
-                "detector_decision_criteria": base_global.detector_decision_criteria,
-                "ensemble_decision_criteria": base_global.ensemble_decision_criteria,
-                "decision_window": base_global.decision_window,
-                "suppression_window": base_global.suppression_window,
-                "recent_samples_size": base_global.recent_samples_size,
-                "eval_macro_f1": eval_metrics["macro_f1"],
-                "eval_per_stream_f1": str(eval_metrics["per_stream_f1"]),
-            })
-        logger.info("Wrote baseline evaluation to %s", optuna_eval_path)
 
     print("=" * 80)
     print("Greedy ensemble from pool")

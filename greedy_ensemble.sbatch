@@ -37,6 +37,8 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-/data/horse/ws/s4122485-parallelDD/new/modular-parallel-ensemble-drift-detection}"
 source setup.sh
 
+# MOPEDDS run_ensemble is sequential; OMP/BLAS settings don't affect it
+# Keep single-threaded to avoid resource contention
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
