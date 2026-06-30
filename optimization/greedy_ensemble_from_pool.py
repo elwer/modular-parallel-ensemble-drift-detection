@@ -328,12 +328,20 @@ def evaluate_ensemble(*, generators: List[str],
         
         # Run MOPEDDS on stream
         detections = []
+        sample_count = 0
         for x, _y in stream:
-            result = mopedds.update({"x": x})
+            sample_count += 1
+            result = mopedds.update(x)
             if result:
-                detections.append(x)
+                detections.append(sample_count - 1)  # Store sample index, not x
         
-        logger.info(f"Stream {s_idx}: known drifts={len(known)}, MOPEDDS detections={len(detections)}")
+        logger.info(f"Stream {s_idx}: samples={sample_count}, known drifts={len(known)}, MOPEDDS detections={len(detections)}")
+        if len(detections) == 0:
+            logger.warning(f"Stream {s_idx}: MOPEDDS detected NO drifts! ensemble_crit={g.ensemble_decision_criteria}, det_crit={g.detector_decision_criteria}, decision_window={g.decision_window}")
+            # Check if individual detectors triggered
+            logger.warning(f"Stream {s_idx}: ensemble has {len(mopedds.detectors)} detectors")
+            for i, det in enumerate(mopedds.detectors):
+                logger.warning(f"Stream {s_idx}: detector {i} ({det.__class__.__name__}) recent_samples_size={getattr(det, 'recent_samples_size', 'N/A')}")
         
         # Apply suppression
         from main_synthetic import apply_suppression, evaluate_detections
