@@ -469,6 +469,7 @@ def greedy_select(*, pool: List[PoolEntry],
         best_train_metrics: Optional[Dict[str, object]] = None
         best_selection_score = -math.inf
         best_train_macro = -math.inf
+        tasks = []  # Initialize for all steps
 
         # Step 1: Skip re-evaluation, use Optuna scores from pool
         if step == 1 and not ensemble:
@@ -505,7 +506,6 @@ def greedy_select(*, pool: List[PoolEntry],
             }
             ensemble_dicts = [{"kind": e.kind, "params": e.params} for e in ensemble]
             
-            tasks = []
             for cand in pool:
                 if any(cand is e for e in ensemble):
                     continue
