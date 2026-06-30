@@ -169,6 +169,9 @@ def _row_to_pool_entry(row: Dict[str, str], source: str) -> Optional[PoolEntry]:
                 params[suffix] = int(fv) if fv.is_integer() and "." not in sv else fv
             except ValueError:
                 params[suffix] = sv
+    # Reject entries with empty params
+    if not params:
+        return None
     return PoolEntry(
         source=source,
         kind=kind,
