@@ -45,10 +45,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GlobalConfig:
     detector_decision_criteria: str
-    ensemble_decision_criteria: str
     decision_window: int
-    suppression_window: int
-    recent_samples_size: int
 
 
 @dataclass
@@ -91,9 +88,7 @@ def build_stream(generator_name: str, drift_frequency: int, stream_length: int, 
 def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: int,
                     stream_seed: int, tolerance: int, slot_specs: List[Dict],
                     detector_seed_base: int, s_idx: int,
-                    detector_criterion: str, ensemble_criterion: str,
-                    decision_window: int, suppression_window: int,
-                    recent_samples_size: int) -> Tuple:
+                    detector_decision_criteria: str, decision_window: int) -> Tuple:
     """Run detector on a single stream."""
     generator_map = {
         'SineClusters': SineClusters,
@@ -130,11 +125,8 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
     
     mopedds = ThreadsDeployment(
         detectors=detectors,
-        detector_criterion=detector_criterion,
-        ensemble_criterion=ensemble_criterion,
+        detector_decision_criteria=detector_decision_criteria,
         decision_window=decision_window,
-        suppression_window=suppression_window,
-        recent_samples_size=recent_samples_size,
     )
     
     detections = list(mopedds.process_stream(stream))
@@ -187,10 +179,7 @@ def evaluate_ensemble(generators: List[str], drift_frequencies: List[int],
                 detector_seed,
                 s_idx,
                 global_config.detector_decision_criteria,
-                global_config.ensemble_decision_criteria,
                 global_config.decision_window,
-                global_config.suppression_window,
-                global_config.recent_samples_size,
             ),
             timeout=per_trial_timeout,
         )
@@ -274,18 +263,11 @@ def create_optuna_objective(current_ensemble: List[EnsembleMember],
         
         detector_decision_criteria = trial.suggest_categorical(
             'detector_decision_criteria', ['any', 'majority', 'all'])
-        ensemble_decision_criteria = trial.suggest_categorical(
-            'ensemble_decision_criteria', ['any', 'majority', 'all'])
         decision_window = trial.suggest_int('decision_window', 1, 100)
-        suppression_window = trial.suggest_int('suppression_window', 0, 50)
-        recent_samples_size = trial.suggest_int('recent_samples_size', 100, 1000)
         
         global_config = GlobalConfig(
             detector_decision_criteria=detector_decision_criteria,
-            ensemble_decision_criteria=ensemble_decision_criteria,
             decision_window=decision_window,
-            suppression_window=suppression_window,
-            recent_samples_size=recent_samples_size,
         )
         
         new_ensemble = current_ensemble + [EnsembleMember(
@@ -378,10 +360,7 @@ def greedy_select_optuna(*,
         
         global_config = GlobalConfig(
             detector_decision_criteria=best_trial.params['detector_decision_criteria'],
-            ensemble_decision_criteria=best_trial.params['ensemble_decision_criteria'],
             decision_window=best_trial.params['decision_window'],
-            suppression_window=best_trial.params['suppression_window'],
-            recent_samples_size=best_trial.params['recent_samples_size'],
         )
         
         ensemble.append(EnsembleMember(kind=detector_type, params=detector_params, source="optuna"))
@@ -420,12 +399,11 @@ def greedy_select_optuna(*,
         eval_improvement_vs_base = eval_metrics['macro_f1'] - base_eval
         
         logger.info(
-            "step=%d N=%d +%s  train_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  eval_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  det_crit=%s ens=%s dw=%d sw=%d",
+            "step=%d N=%d +%s  train_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  eval_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  det_crit=%s dw=%d",
             step, len(ensemble), detector_type,
             train_metrics['macro_f1'], train_delta, train_improvement_vs_base,
             eval_metrics['macro_f1'], eval_delta, eval_improvement_vs_base,
-            global_config.detector_decision_criteria, global_config.ensemble_decision_criteria,
-            global_config.decision_window, global_config.suppression_window,
+            global_config.detector_decision_criteria, global_config.decision_window,
         )
         
         if step > 1 and eval_metrics['macro_f1'] <= current_eval + 1e-9:
@@ -444,10 +422,7 @@ def greedy_select_optuna(*,
             "added_kind": detector_type,
             "added_params": detector_params,
             "det_crit": global_config.detector_decision_criteria,
-            "ens_crit": global_config.ensemble_decision_criteria,
             "decision_window": global_config.decision_window,
-            "suppression_window": global_config.suppression_window,
-            "recent_samples_size": global_config.recent_samples_size,
             "train_macro_f1": train_metrics['macro_f1'],
             "train_delta": train_delta,
             "train_improvement_vs_base": train_improvement_vs_base,
