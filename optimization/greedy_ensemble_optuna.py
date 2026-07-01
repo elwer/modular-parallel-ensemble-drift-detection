@@ -283,6 +283,9 @@ def load_best_n1_detector(pool_glob: str) -> Tuple[str, Dict[str, object], Globa
         with open(csv_file, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
+                # Skip errored trials
+                if (row.get("error") or "").strip():
+                    continue
                 f1 = float(row.get('macro_f1', -math.inf))
                 if f1 > best_f1:
                     best_f1 = f1
@@ -291,11 +294,18 @@ def load_best_n1_detector(pool_glob: str) -> Tuple[str, Dict[str, object], Globa
     if best_entry is None:
         raise ValueError(f"No valid entries found in CSV files")
     
-    # Extract detector type and params
-    detector_type = best_entry['kind']
-    # Parse params from string (stored as JSON-like string)
-    import ast
-    detector_params = ast.literal_eval(best_entry['params'])
+    # Extract detector type (CSV uses slot0_type format)
+    detector_type = best_entry.get('slot0_type', '')
+    if not detector_type:
+        raise ValueError(f"No detector type found in CSV entry")
+    
+    # Extract detector params (CSV uses slot0_<type>_<param> format)
+    detector_params = {}
+    prefix = f"slot0_{detector_type}_"
+    for key, value in best_entry.items():
+        if key.startswith(prefix):
+            param_name = key[len(prefix):]
+            detector_params[param_name] = value
     
     # Extract global config
     global_config = GlobalConfig(
