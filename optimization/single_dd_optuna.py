@@ -99,7 +99,7 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
         sample_idx += 1
     
     # Get known drift locations
-    known = stream.drift_locations
+    known = stream.drifts
     
     # Compute metrics
     tp, fp, fn, mean_delay = 0, 0, 0, 0.0

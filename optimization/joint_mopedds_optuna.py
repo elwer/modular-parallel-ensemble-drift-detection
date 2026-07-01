@@ -132,7 +132,7 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
             detections.append(mopedds.drift_reported_at_sample)
     
     # Get known drift locations
-    known = stream.drift_locations
+    known = stream.drifts
     
     # Compute metrics
     tp, fp, fn, mean_delay = 0, 0, 0, 0.0
