@@ -218,28 +218,39 @@ def evaluate_ensemble(generators: List[str], drift_frequencies: List[int],
 
 
 def suggest_detector_params(trial: optuna.Trial, detector_type: str) -> Dict[str, object]:
-    """Suggest detector hyperparameters based on type."""
-    CLASS_PATH = {
-        'IBDD': 'detectors.ibdd.IBDD',
-        'OCDD': 'detectors.ocdd.OCDD',
-        'D3': 'detectors.d3.D3',
-        'SPLL': 'detectors.spll.SPLL',
-        'UDetect': 'detectors.udetect.UDetect',
-        'CSDDM': 'detectors.csddm.CSDDM',
-        'BNDM': 'detectors.bndm.BNDM',
-    }
-    detector_class = get_detector_class(CLASS_PATH[detector_type])
+    """Suggest hyperparameters for a specific detector type."""
     params = {}
     
-    for param_name, param_range in detector_class.hyperparameter_ranges().items():
-        if isinstance(param_range, tuple) and len(param_range) == 2:
-            low, high = param_range
-            if isinstance(low, int) and isinstance(high, int):
-                params[param_name] = trial.suggest_int(f'{detector_type.lower()}_{param_name}', low, high)
-            else:
-                params[param_name] = trial.suggest_float(f'{detector_type.lower()}_{param_name}', low, high)
-        elif isinstance(param_range, list):
-            params[param_name] = trial.suggest_categorical(f'{detector_type.lower()}_{param_name}', param_range)
+    if detector_type == "BNDM":
+        params['n_samples'] = trial.suggest_int('bndm_n_samples', 50, 500)
+        params['const'] = trial.suggest_float('bndm_const', 0.1, 10.0)
+        params['threshold'] = trial.suggest_float('bndm_threshold', 0.1, 0.9)
+        params['max_depth'] = trial.suggest_int('bndm_max_depth', 1, 10)
+    elif detector_type == "CSDDM":
+        params['n_samples'] = trial.suggest_int('csddm_n_samples', 50, 500)
+        params['feature_proportion'] = trial.suggest_float('csddm_feature_proportion', 0.1, 1.0)
+        params['n_clusters'] = trial.suggest_int('csddm_n_clusters', 2, 30)
+        params['confidence'] = trial.suggest_categorical('csddm_confidence', [0.25, 0.1, 0.05, 0.025, 0.01, 0.005, 0.001])
+    elif detector_type == "D3":
+        params['n_reference_samples'] = trial.suggest_int('d3_n_reference_samples', 50, 500)
+        params['recent_samples_proportion'] = trial.suggest_float('d3_recent_samples_proportion', 0.05, 0.5)
+        params['threshold'] = trial.suggest_float('d3_threshold', 0.1, 0.9)
+    elif detector_type == "IBDD":
+        params['n_samples'] = trial.suggest_int('ibdd_n_samples', 100, 2000)
+        params['n_consecutive_deviations'] = trial.suggest_int('ibdd_n_consecutive_deviations', 1, 20)
+        params['n_permutations'] = trial.suggest_int('ibdd_n_permutations', 100, 1000)
+        params['update_interval'] = trial.suggest_int('ibdd_update_interval', 10, 100)
+    elif detector_type == "OCDD":
+        params['n_samples'] = trial.suggest_int('ocdd_n_samples', 50, 500)
+        params['threshold'] = trial.suggest_float('ocdd_threshold', 0.1, 0.9)
+    elif detector_type == "SPLL":
+        params['n_samples'] = trial.suggest_int('spll_n_samples', 100, 1000)
+        params['n_clusters'] = trial.suggest_int('spll_n_clusters', 2, 20)
+        params['threshold'] = trial.suggest_float('spll_threshold', 0.1, 5.0)
+    elif detector_type == "UDetect":
+        params['n_windows'] = trial.suggest_int('udetect_n_windows', 5, 50)
+        params['n_samples'] = trial.suggest_int('udetect_n_samples', 50, 500)
+        params['disjoint_training_windows'] = trial.suggest_categorical('udetect_disjoint_training_windows', [True, False])
     
     return params
 
