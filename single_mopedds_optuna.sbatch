@@ -37,6 +37,7 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 TAG="${STUDY_TAG:-SingleMOPEDDS}"
+OUT_DIR="${OUT_DIR:-synthetic_multistream_results_2h}"
 mkdir -p "${OUT_DIR}/${TAG}"
 OUTPUT_CSV="${OUT_DIR}/${TAG}/single_mopedds_${DETECTOR_TYPE}_${TAG}_S${N_STREAMS}.csv"
 LOG="${OUT_DIR}/${TAG}/single_mopedds_${DETECTOR_TYPE}_${TAG}_S${N_STREAMS}.log"
