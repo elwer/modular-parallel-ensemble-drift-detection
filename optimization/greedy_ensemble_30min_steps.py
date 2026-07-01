@@ -328,10 +328,14 @@ def greedy_select_optuna(*,
     base_train = 0.0
     base_eval = 0.0
     
+    # Generate unique run ID for study isolation
+    import uuid
+    run_id = str(uuid.uuid4())[:8]
+    
     for step in range(1, max_n + 1):
         logger.info(f"Step {step}: Running Optuna study with {step_timeout_hours}h timeout")
         
-        study_name = f"greedy_step_{step}"
+        study_name = f"greedy_step_{step}_{run_id}"
         # Delete existing study if present to start fresh
         try:
             optuna.delete_study(study_name=study_name, storage=optuna_storage)
