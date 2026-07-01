@@ -332,12 +332,17 @@ def greedy_select_optuna(*,
         logger.info(f"Step {step}: Running Optuna study with {step_timeout_hours}h timeout")
         
         study_name = f"greedy_step_{step}"
+        # Delete existing study if present to start fresh
+        try:
+            optuna.delete_study(study_name=study_name, storage=optuna_storage)
+        except:
+            pass  # Study doesn't exist, that's fine
+        
         study = optuna.create_study(
             study_name=study_name,
             storage=optuna_storage,
             sampler=TPESampler(seed=detector_seed),
             direction="maximize",
-            load_if_exists=True,
         )
         
         objective = create_optuna_objective(
