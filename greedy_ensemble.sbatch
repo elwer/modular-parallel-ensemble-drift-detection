@@ -82,6 +82,15 @@ fi
 if [[ -n "${SELECTION_STRATEGY:-}" ]]; then
     EXTRA_ARGS+=(--selection-strategy "${SELECTION_STRATEGY}")
 fi
+if [[ -n "${INNER_SEARCH_DECISION_WINDOW:-}" ]]; then
+    EXTRA_ARGS+=(--inner-search-decision-window "${INNER_SEARCH_DECISION_WINDOW}")
+fi
+if [[ -n "${INNER_SEARCH_SUPPRESSION_WINDOW:-}" ]]; then
+    EXTRA_ARGS+=(--inner-search-suppression-window "${INNER_SEARCH_SUPPRESSION_WINDOW}")
+fi
+if [[ "${INNER_SEARCH_DET_CRIT:-0}" == "1" ]]; then
+    EXTRA_ARGS+=(--inner-search-det-crit)
+fi
 
 python optimization/greedy_ensemble_from_pool.py \
     --n-streams "${N_STREAMS}" \
