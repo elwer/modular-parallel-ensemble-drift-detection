@@ -74,7 +74,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 # Default timeout for individual evaluations (seconds)
-DEFAULT_EVAL_TIMEOUT = 600  # 10 minutes
+DEFAULT_EVAL_TIMEOUT = 1200  # 20 minutes
 
 
 class TimeoutError(Exception):
@@ -412,11 +412,11 @@ def evaluate_ensemble(*, generators: List[str],
 ENS_CRITS = ("any", "majority", "all")
 
 
-def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], Dict, str, Dict[str, object]]:
+def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], Dict, str, Dict[str, object], Dict]:
     """Worker function for parallel candidate evaluation.
     
     Args are primitive types only (no complex objects) for reliable pickling.
-    Returns: (macro_f1, per_stream_f1, candidate_dict, ens_crit, metrics)
+    Returns: (macro_f1, per_stream_f1, candidate_dict, ens_crit, metrics, global_dict)
     """
     (cand_dict, ensemble_dicts, ec, base_global_dict, generators, drift_frequencies,
      stream_length, stream_seeds, tolerances, train_indices, detector_seed, eval_timeout) = args_tuple
@@ -441,10 +441,10 @@ def _evaluate_candidate_task(args_tuple: Tuple) -> Tuple[float, List[float], Dic
             detector_seed=detector_seed,
             g=g,
         )
-        return (m["macro_f1"], m["per_stream_f1"], cand_dict, ec, m)
+        return (m["macro_f1"], m["per_stream_f1"], cand_dict, ec, m, base_global_dict)
     except TimeoutError:
         logger.warning(f"Evaluation timed out after {eval_timeout}s, returning worst score")
-        return (0.0, [0.0] * len(train_indices), cand_dict, ec, {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)})
+        return (0.0, [0.0] * len(train_indices), cand_dict, ec, {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)}, base_global_dict)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -481,6 +481,9 @@ def greedy_select(*, pool: List[PoolEntry],
                   eval_indices: List[int],
                   base_global: GlobalConfig,
                   inner_search_ens_crit: bool,
+                  inner_search_decision_windows: Optional[List[int]] = None,
+                  inner_search_suppression_windows: Optional[List[int]] = None,
+                  inner_search_det_crits: Optional[List[str]] = None,
                   detector_seed: int,
                   max_n: int,
                   stop_on_no_improve: bool,
@@ -502,6 +505,7 @@ def greedy_select(*, pool: List[PoolEntry],
         best_candidate: Optional[PoolEntry] = None
         best_ens_crit: Optional[str] = base_global.ensemble_decision_criteria
         best_train_metrics: Optional[Dict[str, object]] = None
+        best_global_config: Optional[GlobalConfig] = None
         best_selection_score = -math.inf
         best_train_macro = -math.inf
         tasks = []  # Initialize for all steps
@@ -534,16 +538,33 @@ def greedy_select(*, pool: List[PoolEntry],
             }
             ensemble_dicts = [{"kind": e.kind, "params": e.params} for e in ensemble]
             
+            # Build search space for global parameters
+            decision_windows = inner_search_decision_windows if inner_search_decision_windows else [base_global.decision_window]
+            suppression_windows = inner_search_suppression_windows if inner_search_suppression_windows else [base_global.suppression_window]
+            det_crits = inner_search_det_crits if inner_search_det_crits else [base_global.detector_decision_criteria]
+            
             for cand in pool:
                 if any(cand is e for e in ensemble):
                     continue
                 cand_dict = {"kind": cand.kind, "params": cand.params, "source": cand.source, "macro_f1": cand.macro_f1}
+                
+                # Generate all combinations of search parameters
                 for ec in ens_crits:
-                    tasks.append((
-                        cand_dict, ensemble_dicts, ec, base_global_dict,
-                        generators, drift_frequencies, stream_length,
-                        stream_seeds, tolerances, train_indices, detector_seed, eval_timeout
-                    ))
+                    for dw in decision_windows:
+                        for sw in suppression_windows:
+                            for dc in det_crits:
+                                # Create a modified global dict for this combination
+                                combo_global_dict = base_global_dict.copy()
+                                combo_global_dict["decision_window"] = dw
+                                combo_global_dict["suppression_window"] = sw
+                                combo_global_dict["detector_decision_criteria"] = dc
+                                combo_global_dict["ensemble_decision_criteria"] = ec
+                                
+                                tasks.append((
+                                    cand_dict, ensemble_dicts, ec, combo_global_dict,
+                                    generators, drift_frequencies, stream_length,
+                                    stream_seeds, tolerances, train_indices, detector_seed, eval_timeout
+                                ))
 
         logger.info("Step %d: use_mp=%s, n_workers=%d, tasks=%d", step, use_mp, n_workers, len(tasks))
         
@@ -557,7 +578,7 @@ def greedy_select(*, pool: List[PoolEntry],
                 ctx = mp.get_context("spawn")
                 with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
                     results = pool_mp.map(_evaluate_candidate_task, tasks, chunksize=1)
-                for macro_f1, per_stream_f1, cand_dict, ec, m in results:
+                for macro_f1, per_stream_f1, cand_dict, ec, m, global_dict in results:
                     # Reconstruct PoolEntry from dict
                     cand = PoolEntry(
                         kind=cand_dict["kind"],
@@ -576,6 +597,13 @@ def greedy_select(*, pool: List[PoolEntry],
                         best_candidate = cand
                         best_ens_crit = ec
                         best_train_metrics = m
+                        best_global_config = GlobalConfig(
+                            detector_decision_criteria=global_dict["detector_decision_criteria"],
+                            ensemble_decision_criteria=global_dict["ensemble_decision_criteria"],
+                            decision_window=global_dict["decision_window"],
+                            suppression_window=global_dict["suppression_window"],
+                            recent_samples_size=global_dict["recent_samples_size"],
+                        )
                 logger.info("Step %d: best train score = %.4f", step, best_train_macro)
             except Exception as e:
                 logger.warning("Parallel evaluation failed: %s. Falling back to sequential.", e)
@@ -587,40 +615,50 @@ def greedy_select(*, pool: List[PoolEntry],
                 if any(cand is e for e in ensemble):
                     continue
                 trial_specs = [(e.kind, e.params) for e in ensemble] + [(cand.kind, cand.params)]
+                
+                # Build search space for global parameters
+                decision_windows = inner_search_decision_windows if inner_search_decision_windows else [base_global.decision_window]
+                suppression_windows = inner_search_suppression_windows if inner_search_suppression_windows else [base_global.suppression_window]
+                det_crits = inner_search_det_crits if inner_search_det_crits else [base_global.detector_decision_criteria]
+                
                 for ec in ens_crits:
-                    g = GlobalConfig(
-                        detector_decision_criteria=base_global.detector_decision_criteria,
-                        ensemble_decision_criteria=ec,
-                        decision_window=base_global.decision_window,
-                        suppression_window=base_global.suppression_window,
-                        recent_samples_size=base_global.recent_samples_size,
-                    )
-                    try:
-                        m = with_timeout(evaluate_ensemble, eval_timeout,
-                            generators=generators,
-                            drift_frequencies=drift_frequencies,
-                            stream_length=stream_length,
-                            stream_seeds=stream_seeds,
-                            tolerances=tolerances,
-                            indices=train_indices,
-                            slot_specs=trial_specs,
-                            detector_seed=detector_seed,
-                            g=g,
-                        )
-                    except TimeoutError:
-                        logger.warning(f"Evaluation timed out after {eval_timeout}s, skipping candidate")
-                        m = {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)}
-                    if selection_strategy == "complementarity":
-                        score = _compute_complementarity_score(m["per_stream_f1"], current_train_per_stream)
-                    else:  # macro_f1
-                        # Score is the improvement over current ensemble
-                        score = m["macro_f1"] - current_train
-                    if score > best_selection_score:
-                        best_selection_score = score
-                        best_train_macro = m["macro_f1"]  # Store actual macro F1 for logging
-                        best_candidate = cand
-                        best_ens_crit = ec
-                        best_train_metrics = m
+                    for dw in decision_windows:
+                        for sw in suppression_windows:
+                            for dc in det_crits:
+                                g = GlobalConfig(
+                                    detector_decision_criteria=dc,
+                                    ensemble_decision_criteria=ec,
+                                    decision_window=dw,
+                                    suppression_window=sw,
+                                    recent_samples_size=base_global.recent_samples_size,
+                                )
+                                try:
+                                    m = with_timeout(evaluate_ensemble, eval_timeout,
+                                        generators=generators,
+                                        drift_frequencies=drift_frequencies,
+                                        stream_length=stream_length,
+                                        stream_seeds=stream_seeds,
+                                        tolerances=tolerances,
+                                        indices=train_indices,
+                                        slot_specs=trial_specs,
+                                        detector_seed=detector_seed,
+                                        g=g,
+                                    )
+                                except TimeoutError:
+                                    logger.warning(f"Evaluation timed out after {eval_timeout}s, skipping candidate")
+                                    m = {"macro_f1": 0.0, "per_stream_f1": [0.0] * len(train_indices)}
+                                if selection_strategy == "complementarity":
+                                    score = _compute_complementarity_score(m["per_stream_f1"], current_train_per_stream)
+                                else:  # macro_f1
+                                    # Score is the improvement over current ensemble
+                                    score = m["macro_f1"] - current_train
+                                if score > best_selection_score:
+                                    best_selection_score = score
+                                    best_train_macro = m["macro_f1"]  # Store actual macro F1 for logging
+                                    best_candidate = cand
+                                    best_ens_crit = ec
+                                    best_train_metrics = m
+                                    best_global_config = g
 
         if best_candidate is None:
             logger.warning("No candidate available; stopping at N=%d", len(ensemble))
@@ -636,7 +674,8 @@ def greedy_select(*, pool: List[PoolEntry],
         ensemble.append(best_candidate)
         # Evaluate the accepted ensemble on the held-out eval indices.
         logger.info(f"Step {step}: Evaluating ensemble on eval indices {eval_indices}")
-        g_final = GlobalConfig(
+        # Use the best global config from inner search, or base_global if Step 1
+        g_final = best_global_config if best_global_config else GlobalConfig(
             detector_decision_criteria=base_global.detector_decision_criteria,
             ensemble_decision_criteria=best_ens_crit,
             decision_window=base_global.decision_window,
@@ -673,6 +712,9 @@ def greedy_select(*, pool: List[PoolEntry],
         train_improvement_vs_base = current_train - base_train
         eval_improvement_vs_base = current_eval - base_eval
         
+        # Use best global config from inner search, or base_global if Step 1
+        g_record = best_global_config if best_global_config else base_global
+        
         record = {
             "step": step,
             "n": len(ensemble),
@@ -680,10 +722,10 @@ def greedy_select(*, pool: List[PoolEntry],
             "added_source": best_candidate.source,
             "added_params": best_candidate.params,
             "ens_crit": best_ens_crit,
-            "det_crit": base_global.detector_decision_criteria,
-            "decision_window": base_global.decision_window,
-            "suppression_window": base_global.suppression_window,
-            "recent_samples_size": base_global.recent_samples_size,
+            "det_crit": g_record.detector_decision_criteria,
+            "decision_window": g_record.decision_window,
+            "suppression_window": g_record.suppression_window,
+            "recent_samples_size": g_record.recent_samples_size,
             "train_macro_f1": best_train_macro,
             "train_delta": train_delta,
             "train_improvement_vs_base": train_improvement_vs_base,
@@ -696,9 +738,10 @@ def greedy_select(*, pool: List[PoolEntry],
         }
         history.append(record)
         logger.info(
-            "step=%d N=%d +%s params=%s  train_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  eval_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  ens=%s",
+            "step=%d N=%d +%s params=%s  train_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  eval_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  det_crit=%s ens=%s dw=%d sw=%d",
             step, len(ensemble), best_candidate.kind, best_candidate.params,
-            best_train_macro, train_delta, train_improvement_vs_base, eval_metrics["macro_f1"], eval_delta, eval_improvement_vs_base, best_ens_crit,
+            best_train_macro, train_delta, train_improvement_vs_base, eval_metrics["macro_f1"], eval_delta, eval_improvement_vs_base,
+            g_record.detector_decision_criteria, best_ens_crit, g_record.decision_window, g_record.suppression_window,
         )
 
     return history
@@ -812,6 +855,15 @@ def main():
     ap.add_argument("--eval-timeout", type=int, default=DEFAULT_EVAL_TIMEOUT,
                     help="Timeout in seconds for individual ensemble evaluations. "
                          f"Default: {DEFAULT_EVAL_TIMEOUT} (10 minutes). Set to 0 to disable.")
+    # Inner search over global parameters (light ablation during greedy selection)
+    ap.add_argument("--inner-search-decision-window", type=str, default=None,
+                    help="Comma-separated list of decision_window values to search. "
+                         "Example: '5,10,15,20'. If not set, uses fixed value from --decision-window.")
+    ap.add_argument("--inner-search-suppression-window", type=str, default=None,
+                    help="Comma-separated list of suppression_window values to search. "
+                         "Example: '0,1,3,5'. If not set, uses fixed value from --suppression-window.")
+    ap.add_argument("--inner-search-det-crit", action="store_true",
+                    help="Search over detector_decision_criteria values (any, majority, all).")
     # Anchors for global params (det_crit, decision_window, ...). 'best' means
     # inherit from the top-1 pool entry; otherwise override explicitly.
     ap.add_argument("--globals", default="best",
@@ -915,6 +967,22 @@ def main():
                     "disabling --inner-search-ens-crit.")
         inner_search_ens_crit = False
 
+    # Parse inner search spaces for global parameters
+    inner_search_decision_windows = None
+    if args.inner_search_decision_window:
+        inner_search_decision_windows = [int(x.strip()) for x in args.inner_search_decision_window.split(',')]
+        logger.info(f"Inner search over decision_window: {inner_search_decision_windows}")
+    
+    inner_search_suppression_windows = None
+    if args.inner_search_suppression_window:
+        inner_search_suppression_windows = [int(x.strip()) for x in args.inner_search_suppression_window.split(',')]
+        logger.info(f"Inner search over suppression_window: {inner_search_suppression_windows}")
+    
+    inner_search_det_crits = None
+    if args.inner_search_det_crit:
+        inner_search_det_crits = ["any", "majority", "all"]
+        logger.info(f"Inner search over detector_decision_criteria: {inner_search_det_crits}")
+
     base_global = GlobalConfig(
         detector_decision_criteria=det_crit,
         ensemble_decision_criteria=ens_crit,
@@ -956,6 +1024,9 @@ def main():
         eval_indices=eval_indices,
         base_global=base_global,
         inner_search_ens_crit=inner_search_ens_crit,
+        inner_search_decision_windows=inner_search_decision_windows,
+        inner_search_suppression_windows=inner_search_suppression_windows,
+        inner_search_det_crits=inner_search_det_crits,
         detector_seed=args.seed,
         max_n=args.max_n,
         stop_on_no_improve=args.stop_on_no_improve,
