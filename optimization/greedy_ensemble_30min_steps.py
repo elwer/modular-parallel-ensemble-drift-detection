@@ -24,7 +24,7 @@ from optuna.samplers import TPESampler
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from detectors.mopedds.threads_deployment import ThreadsDeployment
+from detectors.mopedds.mopedds import MOPEDDS
 from datasets.sineclusters import SineClusters
 try:
     from datasets.waveform import WaveformDrift2
@@ -123,13 +123,17 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
         )
         detectors.append(det)
     
-    mopedds = ThreadsDeployment(
-        detectors=detectors,
-        detector_decision_criteria=detector_decision_criteria,
-        decision_window=decision_window,
-    )
+    mopedds = MOPEDDS()
+    mopedds.detectors = detectors
+    mopedds.detector_decision_criteria = detector_decision_criteria
+    mopedds.decision_window = decision_window
+    mopedds.deployment = mopedds._create_deployment()
+    mopedds.deployment.initialize()
     
-    detections = list(mopedds.process_stream(stream))
+    detections = []
+    for x, y in stream:
+        if mopedds.update(x):
+            detections.append(mopedds.drift_reported_at_sample)
     
     tp, fp, fn, mean_delay = evaluate_detections(detections, known, tolerance)
     f1 = _f1_from_counts(tp, fp, fn)
