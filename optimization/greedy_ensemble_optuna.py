@@ -93,7 +93,8 @@ def evaluate_ensemble(*, generators: List[str],
                       global_config: GlobalConfig,
                       detector_seed: int) -> Dict[str, float]:
     """Evaluate a MOPEDDS ensemble on specified stream indices."""
-    from detectors.mopedds import MOPEDDS, ThreadsDeployment
+    from detectors.mopedds import MOPEDDS
+    from detectors.mopedds.threads_deployment import ThreadsDeployment
     
     # Build slot specs from ensemble members
     slot_specs = [(m.kind, m.params) for m in members]
