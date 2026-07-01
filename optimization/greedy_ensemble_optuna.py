@@ -25,7 +25,7 @@ from optuna.samplers import TPESampler
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from optimization.single_dd_optimize_optuna import (
+from optimization.synthetic_f1_multistream_optimize_optuna import (
     _resolve_stream_seeds,
     _resolve_list,
     _resolve_generators,
