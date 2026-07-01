@@ -238,7 +238,7 @@ def hyperparameter_ranges(detector_type: str, trial: optuna.Trial) -> Dict:
             'n_samples': trial.suggest_int('csddm_n_samples', 500, 2000),
             'feature_proportion': trial.suggest_float('csddm_feature_proportion', 0.5, 1.0),
             'n_clusters': trial.suggest_int('csddm_n_clusters', 2, 20),
-            'confidence': trial.suggest_float('csddm_confidence', 0.01, 0.1),
+            'confidence': trial.suggest_categorical('csddm_confidence', [0.25, 0.1, 0.05, 0.025, 0.01, 0.005, 0.001]),
         }
     elif detector_type == 'BNDM':
         return {
