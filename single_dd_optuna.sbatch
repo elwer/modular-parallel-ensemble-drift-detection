@@ -45,6 +45,7 @@ STREAM_LENGTH="${STREAM_LENGTH:-8000}"
 EVAL_STREAM_INDICES="${EVAL_STREAM_INDICES:-1,4,8}"
 OPTUNA_STORAGE="${OPTUNA_STORAGE:-sqlite:///optuna.db}"
 DETECTOR_TYPE="${DETECTOR_TYPE:-IBDD}"
+GENERATORS="${GENERATORS:-SineClusters}"
 mkdir -p "${OUT_DIR}/${TAG}"
 OUTPUT_CSV="${OUT_DIR}/${TAG}/single_${DETECTOR_TYPE}_${TAG}_S${N_STREAMS}.csv"
 LOG="${OUT_DIR}/${TAG}/single_${DETECTOR_TYPE}_${TAG}_S${N_STREAMS}.log"
@@ -54,9 +55,6 @@ if [[ -n "${GENERATORS:-}" ]]; then
     EXTRA_ARGS+=(--generators "${GENERATORS}")
 elif [[ -n "${GENERATOR:-}" ]]; then
     EXTRA_ARGS+=(--generator "${GENERATOR}")
-else
-    echo "ERROR: must set GENERATORS." >&2
-    exit 2
 fi
 if [[ -n "${STREAM_SEEDS:-}" ]]; then
     EXTRA_ARGS+=(--stream-seeds "${STREAM_SEEDS}")
