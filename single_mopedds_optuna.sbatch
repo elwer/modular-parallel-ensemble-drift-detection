@@ -36,7 +36,7 @@ export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-TAG="${STUDY_TAG}"
+TAG="${STUDY_TAG:-SingleMOPEDDS}"
 mkdir -p "${OUT_DIR}/${TAG}"
 OUTPUT_CSV="${OUT_DIR}/${TAG}/single_mopedds_${DETECTOR_TYPE}_${TAG}_S${N_STREAMS}.csv"
 LOG="${OUT_DIR}/${TAG}/single_mopedds_${DETECTOR_TYPE}_${TAG}_S${N_STREAMS}.log"
