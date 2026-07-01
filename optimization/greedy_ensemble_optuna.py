@@ -303,7 +303,7 @@ def load_best_n1_detector(pool_glob: str) -> Tuple[str, Dict[str, object], Globa
     detector_params = {}
     prefix = f"slot0_{detector_type}_"
     for key, value in best_entry.items():
-        if key.startswith(prefix):
+        if key and key.startswith(prefix):
             param_name = key[len(prefix):]
             detector_params[param_name] = value
     
