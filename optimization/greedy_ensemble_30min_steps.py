@@ -352,13 +352,26 @@ def greedy_select_optuna(*,
         
         try:
             import time
+            import threading
+            
+            def timeout_handler():
+                raise TimeoutError(f"Step {step} timed out after {step_timeout_hours * 3600}s")
+            
+            timer = threading.Timer(step_timeout_hours * 3600, timeout_handler)
+            timer.start()
+            
             start_time = time.time()
-            study.optimize(
-                objective,
-                timeout=step_timeout_hours * 3600,
-                n_jobs=n_workers,
-                show_progress_bar=True,
-            )
+            try:
+                study.optimize(
+                    objective,
+                    n_jobs=n_workers,
+                    show_progress_bar=True,
+                )
+            except TimeoutError:
+                logger.warning(f"Step {step}: Manual timeout triggered after {step_timeout_hours * 3600}s")
+            finally:
+                timer.cancel()
+            
             elapsed = time.time() - start_time
             logger.info(f"Step {step}: Optuna completed in {elapsed:.1f}s (timeout was {step_timeout_hours * 3600:.1f}s)")
         except Exception as e:
