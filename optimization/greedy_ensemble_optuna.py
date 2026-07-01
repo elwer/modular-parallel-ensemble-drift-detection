@@ -475,14 +475,6 @@ def greedy_select_optuna(*,
         best_trial = study.best_trial
         logger.info(f"Step {step}: Best trial F1 = {best_trial.value:.4f}")
         
-        # Check if best trial improves over current ensemble
-        if best_trial.value <= current_train + 1e-9:
-            logger.warning(
-                f"Step {step}: No improvement over current ensemble "
-                f"(best={best_trial.value:.4f}, current={current_train:.4f}); stopping."
-            )
-            break
-        
         # Extract best detector and global config
         detector_type = best_trial.params['detector_type']
         detector_params = suggest_detector_params(best_trial, detector_type)
@@ -531,6 +523,14 @@ def greedy_select_optuna(*,
         eval_delta = eval_metrics['macro_f1'] - current_eval
         train_improvement_vs_base = train_metrics['macro_f1'] - base_train
         eval_improvement_vs_base = eval_metrics['macro_f1'] - base_eval
+        
+        # Check if eval improved over current ensemble
+        if eval_metrics['macro_f1'] <= current_eval + 1e-9:
+            logger.warning(
+                f"Step {step}: No eval improvement over current ensemble "
+                f"(eval={eval_metrics['macro_f1']:.4f}, current={current_eval:.4f}); stopping."
+            )
+            break
         
         current_train = train_metrics['macro_f1']
         current_eval = eval_metrics['macro_f1']

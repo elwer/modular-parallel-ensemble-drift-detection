@@ -15,7 +15,7 @@
 #   MAX_N                 Maximum ensemble size
 #   N_TRIALS              Number of Optuna trials per step (optional, default: unlimited)
 #   N_WORKERS             Number of parallel Optuna workers
-#   STEP_TIMEOUT_HOURS    Timeout per greedy step (hours)
+#   STEP_TIMEOUT_HOURS    Timeout per greedy step (hours) (default: 2, set higher for more search time)
 #   GLOBALS_MODE          'best' or 'manual'
 #   SEED                  Base detector seed
 #   OUT_DIR               Output directory
@@ -25,7 +25,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=64
 #SBATCH --ntasks=1
-#SBATCH --time=02:00:00
+#SBATCH --time=12:00:00
 #SBATCH --mem-per-cpu=4096
 
 set -euo pipefail
