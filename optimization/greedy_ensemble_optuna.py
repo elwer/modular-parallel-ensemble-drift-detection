@@ -114,14 +114,19 @@ def evaluate_ensemble(*, generators: List[str],
             tp, fp, fn = with_timeout(
                 _run_one_stream,
                 TRIAL_TIMEOUT,
-                generator=gen,
+                generator_name=gen,
                 drift_frequency=drift_freq,
                 stream_length=stream_length,
-                seed=seed,
+                stream_seed=seed,
                 tolerance=tol,
                 slot_specs=slot_specs,
-                global_config=global_config,
-                detector_seed=detector_seed,
+                detector_seed_base=detector_seed,
+                s_idx=idx,
+                detector_criterion=global_config.detector_decision_criteria,
+                ensemble_criterion=global_config.ensemble_decision_criteria,
+                decision_window=global_config.decision_window,
+                suppression_window=global_config.suppression_window,
+                recent_samples_size=global_config.recent_samples_size,
             )
             tp_total += tp
             fp_total += fp
