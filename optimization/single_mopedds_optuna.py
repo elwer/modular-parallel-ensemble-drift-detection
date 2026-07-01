@@ -310,13 +310,16 @@ def optimize_single_mopedds_member(*,
     logger.info(f"  Workers: {n_workers}")
     logger.info(f"  Trials: {n_trials}")
     
-    # Create Optuna study
+    # Create Optuna study with unique storage per detector type to avoid SQLite locks
+    import uuid
+    run_id = str(uuid.uuid4())[:8]
+    study_name = f"single_mopedds_{detector_type.lower()}_{run_id}"
     study = optuna.create_study(
-        study_name=f"single_mopedds_{detector_type.lower()}",
+        study_name=study_name,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),
         direction="maximize",
-        load_if_exists=True,
+        load_if_exists=False,
     )
     
     objective = create_optuna_objective(
