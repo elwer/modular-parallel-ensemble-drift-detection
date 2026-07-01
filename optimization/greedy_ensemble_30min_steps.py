@@ -318,7 +318,8 @@ def greedy_select_optuna(*,
                          detector_seed: int,
                          max_n: int = 16,
                          n_workers: int = 64,
-                         step_timeout_hours: float = 0.5) -> List[Dict[str, object]]:
+                         step_timeout_hours: float = 0.5,
+                         n_trials_per_step: int = 500) -> List[Dict[str, object]]:
     """Greedy ensemble selection using Optuna at each step."""
     history: List[Dict[str, object]] = []
     ensemble: List[EnsembleMember] = []
@@ -352,28 +353,15 @@ def greedy_select_optuna(*,
         
         try:
             import time
-            import threading
-            
-            def timeout_handler():
-                raise TimeoutError(f"Step {step} timed out after {step_timeout_hours * 3600}s")
-            
-            timer = threading.Timer(step_timeout_hours * 3600, timeout_handler)
-            timer.start()
-            
             start_time = time.time()
-            try:
-                study.optimize(
-                    objective,
-                    n_jobs=n_workers,
-                    show_progress_bar=True,
-                )
-            except TimeoutError:
-                logger.warning(f"Step {step}: Manual timeout triggered after {step_timeout_hours * 3600}s")
-            finally:
-                timer.cancel()
-            
+            study.optimize(
+                objective,
+                n_trials=n_trials_per_step,
+                n_jobs=n_workers,
+                show_progress_bar=True,
+            )
             elapsed = time.time() - start_time
-            logger.info(f"Step {step}: Optuna completed in {elapsed:.1f}s (timeout was {step_timeout_hours * 3600:.1f}s)")
+            logger.info(f"Step {step}: Optuna completed {n_trials_per_step} trials in {elapsed:.1f}s")
         except Exception as e:
             logger.warning(f"Optuna optimization failed: {e}")
             break
@@ -479,6 +467,7 @@ def main():
     ap.add_argument("--max-n", type=int, default=16)
     ap.add_argument("--n-workers", type=int, default=64)
     ap.add_argument("--step-timeout-hours", type=float, default=0.5)
+    ap.add_argument("--n-trials-per-step", type=int, default=500)
     ap.add_argument("--output-csv", required=True)
     args = ap.parse_args()
     
@@ -530,6 +519,7 @@ def main():
         max_n=args.max_n,
         n_workers=args.n_workers,
         step_timeout_hours=args.step_timeout_hours,
+        n_trials_per_step=args.n_trials_per_step,
     )
     
     # Save results
