@@ -272,6 +272,7 @@ def optimize_single_dd(*,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),
         direction="maximize",
+        load_if_exists=True,
     )
     
     objective = create_optuna_objective(
