@@ -30,7 +30,7 @@ try:
     from datasets.waveform import WaveformDrift2
 except Exception:
     WaveformDrift2 = None
-from main_synthetic import evaluate_detections
+from main_synthetic import evaluate_detections, get_detector_class
 
 
 def _f1_from_counts(tp: int, fp: int, fn: int) -> float:
@@ -154,11 +154,19 @@ def evaluate_ensemble(generators: List[str], drift_frequencies: List[int],
                      members: List[EnsembleMember], global_config: GlobalConfig,
                      detector_seed: int, per_trial_timeout: int = 900) -> Dict:
     """Evaluate ensemble on given stream indices."""
-    from detectors import get_detector
+    CLASS_PATH = {
+        'IBDD': 'detectors.ibdd.IBDD',
+        'OCDD': 'detectors.ocdd.OCDD',
+        'D3': 'detectors.d3.D3',
+        'SPLL': 'detectors.spll.SPLL',
+        'UDetect': 'detectors.udetect.UDetect',
+        'CSDDM': 'detectors.csddm.CSDDM',
+        'BNDM': 'detectors.bndm.BNDM',
+    }
     
     slot_specs = []
     for member in members:
-        detector_class = get_detector(member.kind)
+        detector_class = get_detector_class(CLASS_PATH[member.kind])
         slot_specs.append({
             'detector': detector_class,
             'params': member.params,
@@ -211,8 +219,16 @@ def evaluate_ensemble(generators: List[str], drift_frequencies: List[int],
 
 def suggest_detector_params(trial: optuna.Trial, detector_type: str) -> Dict[str, object]:
     """Suggest detector hyperparameters based on type."""
-    from detectors import get_detector
-    detector_class = get_detector(detector_type)
+    CLASS_PATH = {
+        'IBDD': 'detectors.ibdd.IBDD',
+        'OCDD': 'detectors.ocdd.OCDD',
+        'D3': 'detectors.d3.D3',
+        'SPLL': 'detectors.spll.SPLL',
+        'UDetect': 'detectors.udetect.UDetect',
+        'CSDDM': 'detectors.csddm.CSDDM',
+        'BNDM': 'detectors.bndm.BNDM',
+    }
+    detector_class = get_detector_class(CLASS_PATH[detector_type])
     params = {}
     
     for param_name, param_range in detector_class.hyperparameter_ranges().items():
