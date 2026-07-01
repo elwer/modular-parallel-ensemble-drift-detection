@@ -308,7 +308,7 @@ def joint_optimize_mopedds(*,
                             train_indices: List[int],
                             eval_indices: List[int],
                             detector_seed: int,
-                            ensemble_size: int = 16,
+                            ensemble_size: int = 4,
                             n_workers: int = 64,
                             n_trials: int = 500) -> Dict:
     """Joint MOPEDDS ensemble optimization using Optuna."""
@@ -422,7 +422,7 @@ if __name__ == "__main__":
     ap.add_argument("--generators", type=str, default=None)
     ap.add_argument("--generator", type=str, default=None)
     ap.add_argument("--seed", type=int, default=1337)
-    ap.add_argument("--ensemble-size", type=int, default=16)
+    ap.add_argument("--ensemble-size", type=int, default=4)
     ap.add_argument("--n-workers", type=int, default=64)
     ap.add_argument("--n-trials", type=int, default=500)
     ap.add_argument("--output-csv", required=True)

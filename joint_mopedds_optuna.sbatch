@@ -70,7 +70,7 @@ python optimization/joint_mopedds_optuna.py \
     --drift-frequencies "${DRIFT_FREQUENCIES}" \
     --stream-length "${STREAM_LENGTH}" \
     --eval-stream-indices "${EVAL_STREAM_INDICES}" \
-    --ensemble-size "${ENSEMBLE_SIZE:-16}" \
+    --ensemble-size "${ENSEMBLE_SIZE:-4}" \
     --n-workers "${N_WORKERS:-64}" \
     --n-trials "${N_TRIALS:-500}" \
     --seed "${SEED:-1337}" \
