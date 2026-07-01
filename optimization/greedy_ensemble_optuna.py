@@ -57,23 +57,38 @@ class TimeoutError(Exception):
     pass
 
 
-def _timeout_handler(signum, frame):
-    raise TimeoutError("Trial exceeded timeout")
-
-
 def with_timeout(func, timeout_seconds, *args, **kwargs):
-    """Run a function with a timeout using signal.alarm."""
+    """Run a function with a timeout using multiprocessing."""
     if timeout_seconds <= 0:
         return func(*args, **kwargs)
     
-    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-    signal.alarm(timeout_seconds)
-    try:
-        result = func(*args, **kwargs)
-    finally:
-        signal.alarm(0)  # Cancel the alarm
-        signal.signal(signal.SIGALRM, old_handler)  # Restore old handler
-    return result
+    import multiprocessing as mp
+    
+    def worker(queue, func, args, kwargs):
+        try:
+            result = func(*args, **kwargs)
+            queue.put((True, result))
+        except Exception as e:
+            queue.put((False, e))
+    
+    queue = mp.Queue()
+    process = mp.Process(target=worker, args=(queue, func, args, kwargs))
+    process.start()
+    process.join(timeout=timeout_seconds)
+    
+    if process.is_alive():
+        process.terminate()
+        process.join()
+        raise TimeoutError(f"Function exceeded {timeout_seconds}s timeout")
+    
+    if not queue.empty():
+        success, result = queue.get()
+        if success:
+            return result
+        else:
+            raise result
+    else:
+        raise TimeoutError(f"Function exceeded {timeout_seconds}s timeout")
 
 
 @dataclass
