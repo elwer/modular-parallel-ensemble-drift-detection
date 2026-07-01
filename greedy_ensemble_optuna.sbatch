@@ -65,6 +65,9 @@ fi
 if [[ -n "${STREAM_SEEDS:-}" ]]; then
     EXTRA_ARGS+=(--stream-seeds "${STREAM_SEEDS}")
 fi
+if [[ -n "${N_TRIALS:-}" ]]; then
+    EXTRA_ARGS+=(--n-trials "${N_TRIALS}")
+fi
 
 python optimization/greedy_ensemble_optuna.py \
     --pool-glob "${POOL_GLOB}" \
@@ -74,7 +77,6 @@ python optimization/greedy_ensemble_optuna.py \
     --drift-frequencies "${DRIFT_FREQUENCIES}" \
     --stream-length "${STREAM_LENGTH}" \
     --max-n "${MAX_N}" \
-    --n-trials "${N_TRIALS}" \
     --n-workers "${N_WORKERS}" \
     --step-timeout-hours "${STEP_TIMEOUT_HOURS}" \
     --globals "${GLOBALS_MODE}" \
