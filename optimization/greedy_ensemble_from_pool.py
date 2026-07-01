@@ -492,6 +492,8 @@ def greedy_select(*, pool: List[PoolEntry],
     current_train = 0.0
     current_eval = 0.0
     current_train_per_stream = [0.0] * len(train_indices)
+    base_train = 0.0  # Base ensemble (Step 1) train F1
+    base_eval = 0.0   # Base ensemble (Step 1) eval F1
 
     ens_crits = ENS_CRITS if inner_search_ens_crit else (base_global.ensemble_decision_criteria,)
     use_mp = n_workers > 1
@@ -662,6 +664,15 @@ def greedy_select(*, pool: List[PoolEntry],
         train_delta = current_train - (history[-1]["train_macro_f1"] if history else 0.0)
         eval_delta = current_eval - (history[-1]["eval_macro_f1"] if history else 0.0)
         
+        # Set base values after Step 1 (first detector added)
+        if step == 1:
+            base_train = current_train
+            base_eval = current_eval
+        
+        # Calculate improvement against base ensemble
+        train_improvement_vs_base = current_train - base_train
+        eval_improvement_vs_base = current_eval - base_eval
+        
         record = {
             "step": step,
             "n": len(ensemble),
@@ -675,17 +686,19 @@ def greedy_select(*, pool: List[PoolEntry],
             "recent_samples_size": base_global.recent_samples_size,
             "train_macro_f1": best_train_macro,
             "train_delta": train_delta,
+            "train_improvement_vs_base": train_improvement_vs_base,
             "train_per_stream_f1": best_train_metrics["per_stream_f1"],
             "eval_macro_f1": eval_metrics["macro_f1"],
             "eval_delta": eval_delta,
+            "eval_improvement_vs_base": eval_improvement_vs_base,
             "eval_per_stream_f1": eval_metrics["per_stream_f1"],
             "members": [{"kind": e.kind, "source": e.source} for e in ensemble],
         }
         history.append(record)
         logger.info(
-            "step=%d N=%d +%s params=%s  train_macroF1=%.4f (%+.4f)  eval_macroF1=%.4f (%+.4f)  ens=%s",
+            "step=%d N=%d +%s params=%s  train_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  eval_macroF1=%.4f (%+.4f vs prev, %+.4f vs base)  ens=%s",
             step, len(ensemble), best_candidate.kind, best_candidate.params,
-            best_train_macro, train_delta, eval_metrics["macro_f1"], eval_delta, best_ens_crit,
+            best_train_macro, train_delta, train_improvement_vs_base, eval_metrics["macro_f1"], eval_delta, eval_improvement_vs_base, best_ens_crit,
         )
 
     return history
