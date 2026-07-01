@@ -577,7 +577,13 @@ def greedy_select(*, pool: List[PoolEntry],
             try:
                 ctx = mp.get_context("spawn")
                 with ctx.Pool(processes=min(n_workers, len(tasks))) as pool_mp:
-                    results = pool_mp.map(_evaluate_candidate_task, tasks, chunksize=1)
+                    results = []
+                    completed = 0
+                    for result in pool_mp.imap(_evaluate_candidate_task, tasks, chunksize=1):
+                        results.append(result)
+                        completed += 1
+                        if completed % 50 == 0 or completed == len(tasks):
+                            logger.info("Step %d: progress %d/%d candidates evaluated", step, completed, len(tasks))
                 for macro_f1, per_stream_f1, cand_dict, ec, m, global_dict in results:
                     # Reconstruct PoolEntry from dict
                     cand = PoolEntry(
