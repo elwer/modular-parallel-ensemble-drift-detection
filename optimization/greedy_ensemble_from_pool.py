@@ -506,17 +506,10 @@ def greedy_select(*, pool: List[PoolEntry],
 
         # Step 1: Skip re-evaluation, use Optuna scores from pool
         if step == 1 and not ensemble:
-            logger.info("Step 1: Selecting best detector from pool (using Optuna scores)")
+            logger.info("Step 1: Selecting best detector from pool (using Optuna macro F1)")
             for cand in pool:
-                if selection_strategy == "complementarity":
-                    # For complementarity, we need per-stream F1 from pool entry
-                    if hasattr(cand, 'per_stream_f1') and cand.per_stream_f1:
-                        score = _compute_complementarity_score(cand.per_stream_f1, current_train_per_stream)
-                    else:
-                        # Fallback to macro F1 if per-stream not available
-                        score = cand.macro_f1
-                else:  # macro_f1
-                    score = cand.macro_f1
+                # Step 1 always uses macro_f1 for initial selection
+                score = cand.macro_f1
                 if score > best_selection_score:
                     best_selection_score = score
                     best_train_macro = cand.macro_f1
@@ -573,7 +566,8 @@ def greedy_select(*, pool: List[PoolEntry],
                     if selection_strategy == "complementarity":
                         score = _compute_complementarity_score(per_stream_f1, current_train_per_stream)
                     else:  # macro_f1
-                        score = macro_f1
+                        # Score is the improvement over current ensemble
+                        score = macro_f1 - current_train
                     if score > best_selection_score:
                         best_selection_score = score
                         best_train_macro = macro_f1  # Store actual macro F1 for logging
@@ -617,7 +611,8 @@ def greedy_select(*, pool: List[PoolEntry],
                     if selection_strategy == "complementarity":
                         score = _compute_complementarity_score(m["per_stream_f1"], current_train_per_stream)
                     else:  # macro_f1
-                        score = m["macro_f1"]
+                        # Score is the improvement over current ensemble
+                        score = m["macro_f1"] - current_train
                     if score > best_selection_score:
                         best_selection_score = score
                         best_train_macro = m["macro_f1"]  # Store actual macro F1 for logging
