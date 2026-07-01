@@ -127,7 +127,14 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
     mopedds.detectors = detectors
     mopedds.detector_decision_criteria = detector_decision_criteria
     mopedds.decision_window = decision_window
-    mopedds.deploy()
+    mopedds.verbose = False
+    
+    # Suppress verbose output from deploy()
+    import io
+    import contextlib
+    import sys
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        mopedds.deploy()
     
     detections = []
     for x, y in stream:
@@ -146,7 +153,7 @@ def evaluate_ensemble(generators: List[str], drift_frequencies: List[int],
                      stream_length: int, stream_seeds: List[int],
                      tolerances: List[int], indices: List[int],
                      members: List[EnsembleMember], global_config: GlobalConfig,
-                     detector_seed: int, per_trial_timeout: int = 900) -> Dict:
+                     detector_seed: int, per_trial_timeout: int = 120) -> Dict:
     """Evaluate ensemble on given stream indices."""
     CLASS_PATH = {
         'IBDD': 'detectors.ibdd.IBDD',
@@ -344,12 +351,16 @@ def greedy_select_optuna(*,
         )
         
         try:
+            import time
+            start_time = time.time()
             study.optimize(
                 objective,
                 timeout=step_timeout_hours * 3600,
                 n_jobs=n_workers,
                 show_progress_bar=True,
             )
+            elapsed = time.time() - start_time
+            logger.info(f"Step {step}: Optuna completed in {elapsed:.1f}s (timeout was {step_timeout_hours * 3600:.1f}s)")
         except Exception as e:
             logger.warning(f"Optuna optimization failed: {e}")
             break
