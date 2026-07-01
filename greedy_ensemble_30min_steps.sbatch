@@ -62,8 +62,11 @@ fi
 if [[ -n "${STEP_TIMEOUT_HOURS:-}" ]]; then
     EXTRA_ARGS+=(--step-timeout-hours "${STEP_TIMEOUT_HOURS}")
 fi
-if [[ -n "${N_TRIALS_PER_STEP:-}" ]]; then
-    EXTRA_ARGS+=(--n-trials-per-step "${N_TRIALS_PER_STEP}")
+if [[ -n "${N_TRIALS_STEP1:-}" ]]; then
+    EXTRA_ARGS+=(--n-trials-step1 "${N_TRIALS_STEP1}")
+fi
+if [[ -n "${N_TRIALS_STEP2_PLUS:-}" ]]; then
+    EXTRA_ARGS+=(--n-trials-step2-plus "${N_TRIALS_STEP2_PLUS}")
 fi
 
 python optimization/greedy_ensemble_30min_steps.py \

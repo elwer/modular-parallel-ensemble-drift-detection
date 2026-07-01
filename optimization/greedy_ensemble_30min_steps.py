@@ -319,7 +319,8 @@ def greedy_select_optuna(*,
                          max_n: int = 16,
                          n_workers: int = 64,
                          step_timeout_hours: float = 0.5,
-                         n_trials_per_step: int = 500) -> List[Dict[str, object]]:
+                         n_trials_step1: int = 50,
+                         n_trials_step2_plus: int = 100) -> List[Dict[str, object]]:
     """Greedy ensemble selection using Optuna at each step."""
     history: List[Dict[str, object]] = []
     ensemble: List[EnsembleMember] = []
@@ -363,14 +364,16 @@ def greedy_select_optuna(*,
         try:
             import time
             start_time = time.time()
+            # Use different trial counts for step 1 vs step 2+
+            n_trials = n_trials_step1 if step == 1 else n_trials_step2_plus
             study.optimize(
                 objective,
-                n_trials=n_trials_per_step,
+                n_trials=n_trials,
                 n_jobs=n_workers,
                 show_progress_bar=True,
             )
             elapsed = time.time() - start_time
-            logger.info(f"Step {step}: Optuna completed {n_trials_per_step} trials in {elapsed:.1f}s")
+            logger.info(f"Step {step}: Optuna completed {n_trials} trials in {elapsed:.1f}s")
         except Exception as e:
             logger.warning(f"Optuna optimization failed: {e}")
             break
@@ -476,7 +479,8 @@ def main():
     ap.add_argument("--max-n", type=int, default=16)
     ap.add_argument("--n-workers", type=int, default=64)
     ap.add_argument("--step-timeout-hours", type=float, default=0.5)
-    ap.add_argument("--n-trials-per-step", type=int, default=500)
+    ap.add_argument("--n-trials-step1", type=int, default=50)
+    ap.add_argument("--n-trials-step2-plus", type=int, default=100)
     ap.add_argument("--output-csv", required=True)
     args = ap.parse_args()
     
@@ -528,7 +532,8 @@ def main():
         max_n=args.max_n,
         n_workers=args.n_workers,
         step_timeout_hours=args.step_timeout_hours,
-        n_trials_per_step=args.n_trials_per_step,
+        n_trials_step1=args.n_trials_step1,
+        n_trials_step2_plus=args.n_trials_step2_plus,
     )
     
     # Save results
