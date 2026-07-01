@@ -30,7 +30,13 @@ try:
     from datasets.waveform import WaveformDrift2
 except Exception:
     WaveformDrift2 = None
-from main_synthetic import evaluate_detections, _f1_from_counts
+from main_synthetic import evaluate_detections
+
+
+def _f1_from_counts(tp: int, fp: int, fn: int) -> float:
+    """Compute F1 score from TP, FP, FN counts."""
+    denom = 2 * tp + fp + fn
+    return (2.0 * tp / denom) if denom > 0 else 0.0
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
