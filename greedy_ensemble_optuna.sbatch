@@ -10,8 +10,8 @@
 #   STREAM_LENGTH         Stream length
 #   EVAL_STREAM_INDICES   Comma-separated eval indices
 #   TOLERANCES            Comma-separated tolerances (optional)
+#   POOL_GLOB             Glob pattern for N=1 CSV pool
 #   OPTUNA_STORAGE        Optuna storage URL (e.g., sqlite:///optuna.db)
-#   N1_STUDY_NAME         Name of N=1 Optuna study to load best detector from
 #   MAX_N                 Maximum ensemble size
 #   N_TRIALS              Number of Optuna trials per step
 #   N_WORKERS             Number of parallel Optuna workers
@@ -67,8 +67,8 @@ if [[ -n "${STREAM_SEEDS:-}" ]]; then
 fi
 
 python optimization/greedy_ensemble_optuna.py \
+    --pool-glob "${POOL_GLOB}" \
     --optuna-storage "${OPTUNA_STORAGE}" \
-    --n1-study-name "${N1_STUDY_NAME}" \
     --n-streams "${N_STREAMS}" \
     --base-stream-seed "${BASE_STREAM_SEED}" \
     --drift-frequencies "${DRIFT_FREQUENCIES}" \

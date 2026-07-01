@@ -268,33 +268,51 @@ def create_optuna_objective(
     return objective
 
 
-def load_best_n1_detector(optuna_storage: str, study_name: str) -> Tuple[str, Dict[str, object], GlobalConfig]:
-    """Load the best detector from an existing N=1 Optuna study."""
-    study = optuna.load_study(study_name=study_name, storage=optuna_storage)
-    best_trial = study.best_trial
+def load_best_n1_detector(pool_glob: str) -> Tuple[str, Dict[str, object], GlobalConfig]:
+    """Load the best detector from CSV pool (N=1 results)."""
+    import glob
+    
+    csv_files = glob.glob(pool_glob)
+    if not csv_files:
+        raise ValueError(f"No CSV files found matching glob: {pool_glob}")
+    
+    best_entry = None
+    best_f1 = -math.inf
+    
+    for csv_file in csv_files:
+        with open(csv_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                f1 = float(row.get('macro_f1', -math.inf))
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_entry = row
+    
+    if best_entry is None:
+        raise ValueError(f"No valid entries found in CSV files")
     
     # Extract detector type and params
-    detector_type = best_trial.params.get('detector_type', 'ADWIN')
-    detector_params = {k: v for k, v in best_trial.params.items() if k.startswith(detector_type.lower() + '_')}
-    # Remove prefix
-    detector_params = {k[len(detector_type.lower()) + 1:]: v for k, v in detector_params.items()}
+    detector_type = best_entry['kind']
+    # Parse params from string (stored as JSON-like string)
+    import ast
+    detector_params = ast.literal_eval(best_entry['params'])
     
     # Extract global config
     global_config = GlobalConfig(
-        detector_decision_criteria=best_trial.params.get('detector_decision_criteria', 'majority'),
-        ensemble_decision_criteria=best_trial.params.get('ensemble_decision_criteria', 'any'),
-        decision_window=best_trial.params.get('decision_window', 10),
-        suppression_window=best_trial.params.get('suppression_window', 0),
-        recent_samples_size=best_trial.params.get('recent_samples_size', 500),
+        detector_decision_criteria=best_entry.get('detector_decision_criteria', 'majority'),
+        ensemble_decision_criteria=best_entry.get('ensemble_decision_criteria', 'any'),
+        decision_window=int(best_entry.get('decision_window', 10)),
+        suppression_window=int(best_entry.get('suppression_window', 0)),
+        recent_samples_size=int(best_entry.get('recent_samples_size', 500)),
     )
     
-    logger.info(f"Loaded best N=1 detector: {detector_type} with F1={best_trial.value:.4f}")
+    logger.info(f"Loaded best N=1 detector: {detector_type} with F1={best_f1:.4f}")
     return detector_type, detector_params, global_config
 
 
 def greedy_select_optuna(*,
+                         pool_glob: str,
                          optuna_storage: str,
-                         n1_study_name: str,
                          generators: List[str],
                          drift_frequencies: List[int],
                          stream_length: int,
@@ -316,11 +334,9 @@ def greedy_select_optuna(*,
     base_train = 0.0
     base_eval = 0.0
     
-    # Step 1: Load best N=1 detector
-    logger.info("Step 1: Loading best N=1 detector from Optuna study")
-    detector_type, detector_params, global_config = load_best_n1_detector(
-        optuna_storage, n1_study_name
-    )
+    # Step 1: Load best N=1 detector from CSV pool
+    logger.info("Step 1: Loading best N=1 detector from CSV pool")
+    detector_type, detector_params, global_config = load_best_n1_detector(pool_glob)
     
     ensemble.append(EnsembleMember(kind=detector_type, params=detector_params, source="n1"))
     
@@ -534,8 +550,8 @@ def write_history_csv(path: str, history: List[Dict[str, object]]) -> None:
 
 def main():
     ap = ArgumentParser(description="Greedy ensemble selection using Optuna")
+    ap.add_argument("--pool-glob", required=True, help="Glob pattern for N=1 CSV pool")
     ap.add_argument("--optuna-storage", required=True, help="Optuna storage URL (e.g., sqlite:///optuna.db)")
-    ap.add_argument("--n1-study-name", required=True, help="Name of N=1 Optuna study to load best detector from")
     ap.add_argument("--n-streams", type=int, required=True)
     ap.add_argument("--base-stream-seed", type=int, required=True)
     ap.add_argument("--drift-frequencies", type=str, required=True)
@@ -595,7 +611,7 @@ def main():
     print("=" * 80)
     print("Greedy ensemble selection using Optuna")
     print("=" * 80)
-    print(f"  N=1 study          : {args.n1_study_name}")
+    print(f"  Pool glob          : {args.pool_glob}")
     print(f"  N streams          : {args.n_streams}")
     print(f"  Train indices      : {train_indices}")
     print(f"    generators       : {[generators_list[i] for i in train_indices]}")
@@ -610,8 +626,8 @@ def main():
     
     # Run greedy selection
     history = greedy_select_optuna(
+        pool_glob=args.pool_glob,
         optuna_storage=args.optuna_storage,
-        n1_study_name=args.n1_study_name,
         generators=generators_list,
         drift_frequencies=drift_frequencies,
         stream_length=args.stream_length,
