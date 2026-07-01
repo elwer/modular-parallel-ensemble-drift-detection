@@ -30,7 +30,7 @@ try:
     from datasets.waveform import WaveformDrift2
 except Exception:
     WaveformDrift2 = None
-from evaluation import evaluate_detections, _f1_from_counts
+from main_synthetic import evaluate_detections, _f1_from_counts
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
