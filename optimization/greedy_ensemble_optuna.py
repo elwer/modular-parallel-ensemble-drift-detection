@@ -34,7 +34,15 @@ from optimization.synthetic_f1_multistream_optimize_optuna import (
     _run_one_stream,
     GENERATORS,
 )
-from detectors.mopedds import GlobalConfig
+
+
+@dataclass
+class GlobalConfig:
+    detector_decision_criteria: str
+    ensemble_decision_criteria: str
+    decision_window: int
+    suppression_window: int
+    recent_samples_size: int
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
