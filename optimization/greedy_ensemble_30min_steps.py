@@ -127,8 +127,7 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
     mopedds.detectors = detectors
     mopedds.detector_decision_criteria = detector_decision_criteria
     mopedds.decision_window = decision_window
-    mopedds.deployment = mopedds._create_deployment()
-    mopedds.deployment.initialize()
+    mopedds.deploy()
     
     detections = []
     for x, y in stream:
