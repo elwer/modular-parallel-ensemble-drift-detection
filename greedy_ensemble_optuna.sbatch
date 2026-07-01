@@ -13,7 +13,7 @@
 #   POOL_GLOB             Glob pattern for N=1 CSV pool
 #   OPTUNA_STORAGE        Optuna storage URL (e.g., sqlite:///optuna.db)
 #   MAX_N                 Maximum ensemble size
-#   N_TRIALS              Number of Optuna trials per step
+#   N_TRIALS              Number of Optuna trials per step (optional, default: unlimited)
 #   N_WORKERS             Number of parallel Optuna workers
 #   STEP_TIMEOUT_HOURS    Timeout per greedy step (hours)
 #   GLOBALS_MODE          'best' or 'manual'

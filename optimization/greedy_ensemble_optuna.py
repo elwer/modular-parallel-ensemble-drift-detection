@@ -354,7 +354,7 @@ def greedy_select_optuna(*,
                          base_global: GlobalConfig,
                          detector_seed: int,
                          max_n: int,
-                         n_trials: int = 50,
+                         n_trials: Optional[int] = None,
                          n_workers: int = 16,
                          step_timeout_hours: int = 2) -> List[Dict[str, object]]:
     """Greedy ensemble selection using Optuna at each step."""
@@ -459,13 +459,14 @@ def greedy_select_optuna(*,
         
         # Run optimization with timeout
         try:
-            study.optimize(
-                objective,
-                n_trials=n_trials,
-                timeout=step_timeout_hours * 3600,
-                n_jobs=n_workers,
-                show_progress_bar=True,
-            )
+            optimize_kwargs = {
+                'timeout': step_timeout_hours * 3600,
+                'n_jobs': n_workers,
+                'show_progress_bar': True,
+            }
+            if n_trials is not None:
+                optimize_kwargs['n_trials'] = n_trials
+            study.optimize(objective, **optimize_kwargs)
         except Exception as e:
             logger.warning(f"Optuna optimization failed: {e}")
             break
@@ -473,6 +474,14 @@ def greedy_select_optuna(*,
         # Get best trial
         best_trial = study.best_trial
         logger.info(f"Step {step}: Best trial F1 = {best_trial.value:.4f}")
+        
+        # Check if best trial improves over current ensemble
+        if best_trial.value <= current_train + 1e-9:
+            logger.warning(
+                f"Step {step}: No improvement over current ensemble "
+                f"(best={best_trial.value:.4f}, current={current_train:.4f}); stopping."
+            )
+            break
         
         # Extract best detector and global config
         detector_type = best_trial.params['detector_type']
@@ -595,7 +604,7 @@ def main():
     ap.add_argument("--study-tag", type=str, default=None)
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--max-n", type=int, default=8)
-    ap.add_argument("--n-trials", type=int, default=50)
+    ap.add_argument("--n-trials", type=int, default=None, help="Max trials per step (default: unlimited, use timeout)")
     ap.add_argument("--n-workers", type=int, default=16)
     ap.add_argument("--step-timeout-hours", type=int, default=2)
     ap.add_argument("--globals", default="best", choices=["best", "manual"])
