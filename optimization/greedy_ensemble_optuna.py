@@ -111,7 +111,7 @@ def evaluate_ensemble(*, generators: List[str],
         tol = tolerances[idx]
         
         try:
-            tp, fp, fn = with_timeout(
+            tp, fp, fn, mean_delay, f1, precision, recall, n_known = with_timeout(
                 _run_one_stream,
                 TRIAL_TIMEOUT,
                 generator_name=gen,
