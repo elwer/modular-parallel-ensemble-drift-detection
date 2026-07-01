@@ -25,7 +25,11 @@ from optuna.samplers import TPESampler
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from detectors.mopedds.threads_deployment import ThreadsDeployment
-from datasets import get_generator
+from datasets.sineclusters import SineClusters
+try:
+    from datasets.waveform import WaveformDrift2
+except Exception:
+    WaveformDrift2 = None
 from evaluation import evaluate_detections, _f1_from_counts
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -62,8 +66,16 @@ def with_timeout(func, args=(), kwargs={}, timeout=1200):
 
 def build_stream(generator_name: str, drift_frequency: int, stream_length: int, seed: int):
     """Build a synthetic stream."""
-    generator = get_generator(generator_name)
-    return generator(
+    generator_map = {
+        'SineClusters': SineClusters,
+        'WaveformDrift2': WaveformDrift2,
+    }
+    if generator_name not in generator_map:
+        raise ValueError(f"Unknown generator: {generator_name}")
+    generator_class = generator_map[generator_name]
+    if generator_class is None:
+        raise ValueError(f"Generator {generator_name} not available")
+    return generator_class(
         n_samples=stream_length,
         drift_frequency=drift_frequency,
         seed=seed,
@@ -77,8 +89,17 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
                     decision_window: int, suppression_window: int,
                     recent_samples_size: int) -> Tuple:
     """Run detector on a single stream."""
-    generator = get_generator(generator_name)
-    stream = generator(
+    generator_map = {
+        'SineClusters': SineClusters,
+        'WaveformDrift2': WaveformDrift2,
+    }
+    if generator_name not in generator_map:
+        raise ValueError(f"Unknown generator: {generator_name}")
+    generator_class = generator_map[generator_name]
+    if generator_class is None:
+        raise ValueError(f"Generator {generator_name} not available")
+    
+    stream = generator_class(
         n_samples=stream_length,
         drift_frequency=drift_frequency,
         seed=stream_seed,
@@ -88,7 +109,7 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
     sample_count = len(list(stream.samples))
     
     # Rebuild stream for detection
-    stream = generator(
+    stream = generator_class(
         n_samples=stream_length,
         drift_frequency=drift_frequency,
         seed=stream_seed,
