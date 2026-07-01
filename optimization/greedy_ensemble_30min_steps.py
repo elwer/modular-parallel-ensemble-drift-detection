@@ -112,7 +112,6 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
     )
     
     known = list(stream.drifts)
-    sample_count = len(list(stream.samples))
     
     # Rebuild stream for detection
     stream = generator_class(
