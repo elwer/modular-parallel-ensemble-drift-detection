@@ -357,6 +357,9 @@ if __name__ == "__main__":
     # Parse generators
     if args.generators:
         generators = [g.strip() for g in args.generators.split(',')]
+        # If only one generator provided, repeat it for all streams
+        if len(generators) == 1:
+            generators = generators * args.n_streams
     elif args.generator:
         generators = [args.generator] * args.n_streams
     else:
@@ -410,7 +413,10 @@ if __name__ == "__main__":
     # Save results
     os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
     with open(args.output_csv, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['detector_type', 'best_trial_value', 'eval_f1', 'best_params'])
+        fieldnames = ['detector_type', 'best_trial_value', 'eval_f1', 'best_params']
+        if 'error' in result:
+            fieldnames.append('error')
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow(result)
     

@@ -421,6 +421,9 @@ if __name__ == "__main__":
     # Parse generators
     if args.generators:
         generators = [g.strip() for g in args.generators.split(',')]
+        # If only one generator provided, repeat it for all streams
+        if len(generators) == 1:
+            generators = generators * args.n_streams
     elif args.generator:
         generators = [args.generator] * args.n_streams
     else:
