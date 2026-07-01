@@ -82,8 +82,8 @@ def build_stream(generator_name: str, drift_frequency: int, stream_length: int, 
     if generator_class is None:
         raise ValueError(f"Generator {generator_name} not available")
     return generator_class(
-        n_samples=stream_length,
         drift_frequency=drift_frequency,
+        stream_length=stream_length,
         seed=seed,
     )
 
@@ -106,8 +106,8 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
         raise ValueError(f"Generator {generator_name} not available")
     
     stream = generator_class(
-        n_samples=stream_length,
         drift_frequency=drift_frequency,
+        stream_length=stream_length,
         seed=stream_seed,
     )
     
@@ -116,8 +116,8 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
     
     # Rebuild stream for detection
     stream = generator_class(
-        n_samples=stream_length,
         drift_frequency=drift_frequency,
+        stream_length=stream_length,
         seed=stream_seed,
     )
     
