@@ -1,0 +1,76 @@
+#!/bin/bash
+# SLURM template for expert ensemble Optuna optimization.
+#
+# Required env vars (set via sbatch --export):
+#   OPTUNA_STORAGE        Optuna storage URL (e.g., sqlite:///expert_ensemble_optuna.db)
+#   N_STREAMS             Number of streams
+#   BASE_STREAM_SEED      Base stream seed
+#   DRIFT_FREQUENCIES     Comma-separated drift frequencies
+#   STREAM_LENGTH         Stream length
+#   EVAL_STREAM_INDICES   Comma-separated eval indices
+#   GENERATORS            Comma-separated per-stream list (length 1 or N_STREAMS)
+#   SEED                  Base detector seed
+#   N_TRIALS_EXPERT       Number of trials per expert (default: 50)
+#   PER_TRIAL_TIMEOUT     Per-trial timeout in seconds (default: 1200)
+#   OUTPUT_DIR            Output directory
+
+#SBATCH --job-name=ExpertEnsemble
+#SBATCH --cpu-freq=2000000
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=1
+#SBATCH --ntasks=1
+#SBATCH --time=48:00:00
+#SBATCH --mem-per-cpu=8192
+
+set -euo pipefail
+
+cd "${SLURM_SUBMIT_DIR:-/home/eliasw/modular-parallel-ensemble-drift-detection}"
+source setup.sh
+
+# Single-threaded for sequential optimization
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+OPTUNA_STORAGE="${OPTUNA_STORAGE:-sqlite:///expert_ensemble_optuna.db}"
+N_STREAMS="${N_STREAMS:-10}"
+BASE_STREAM_SEED="${BASE_STREAM_SEED:-42}"
+DRIFT_FREQUENCIES="${DRIFT_FREQUENCIES:-200,400,500,750,1000,1250,1500,2000,2500,3000}"
+STREAM_LENGTH="${STREAM_LENGTH:-8000}"
+EVAL_STREAM_INDICES="${EVAL_STREAM_INDICES:-1,4,8}"
+GENERATORS="${GENERATORS:-SineClusters}"
+SEED="${SEED:-1337}"
+N_TRIALS_EXPERT="${N_TRIALS_EXPERT:-50}"
+PER_TRIAL_TIMEOUT="${PER_TRIAL_TIMEOUT:-1200}"
+OUTPUT_DIR="${OUTPUT_DIR:-expert_ensemble_results}"
+
+mkdir -p "${OUTPUT_DIR}"
+LOG="${OUTPUT_DIR}/expert_ensemble_optuna.log"
+
+EXTRA_ARGS=()
+if [[ -n "${GENERATORS:-}" ]]; then
+    EXTRA_ARGS+=(--generators "${GENERATORS}")
+elif [[ -n "${GENERATOR:-}" ]]; then
+    EXTRA_ARGS+=(--generator "${GENERATOR}")
+fi
+if [[ -n "${STREAM_SEEDS:-}" ]]; then
+    EXTRA_ARGS+=(--stream-seeds "${STREAM_SEEDS}")
+fi
+if [[ -n "${TOLERANCES:-}" ]]; then
+    EXTRA_ARGS+=(--tolerances "${TOLERANCES}")
+fi
+
+python optimization/expert_ensemble_optuna.py \
+    --optuna-storage "${OPTUNA_STORAGE}" \
+    --n-streams "${N_STREAMS}" \
+    --base-stream-seed "${BASE_STREAM_SEED}" \
+    --drift-frequencies "${DRIFT_FREQUENCIES}" \
+    --stream-length "${STREAM_LENGTH}" \
+    --eval-stream-indices "${EVAL_STREAM_INDICES}" \
+    --seed "${SEED}" \
+    --n-trials-expert "${N_TRIALS_EXPERT}" \
+    --per-trial-timeout "${PER_TRIAL_TIMEOUT}" \
+    --output-dir "${OUTPUT_DIR}" \
+    "${EXTRA_ARGS[@]}" \
+    2>&1 | tee "${LOG}"
