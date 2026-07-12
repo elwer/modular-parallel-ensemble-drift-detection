@@ -17,7 +17,7 @@
 #SBATCH --job-name=ExpertEnsemble
 #SBATCH --cpu-freq=2000000
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=8
 #SBATCH --ntasks=1
 #SBATCH --time=48:00:00
 #SBATCH --mem-per-cpu=8192
@@ -27,11 +27,12 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-/home/eliasw/modular-parallel-ensemble-drift-detection}"
 source setup.sh
 
-# Single-threaded for sequential optimization
+# Multi-threaded for parallel study optimization
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
 
 OPTUNA_STORAGE="${OPTUNA_STORAGE:-sqlite:///expert_ensemble_optuna.db}"
 N_STREAMS="${N_STREAMS:-10}"
@@ -44,6 +45,7 @@ SEED="${SEED:-1337}"
 N_TRIALS_EXPERT="${N_TRIALS_EXPERT:-50}"
 PER_TRIAL_TIMEOUT="${PER_TRIAL_TIMEOUT:-1200}"
 OUTPUT_DIR="${OUTPUT_DIR:-expert_ensemble_results}"
+N_JOBS="${N_JOBS:-8}"
 
 mkdir -p "${OUTPUT_DIR}"
 LOG="${OUTPUT_DIR}/expert_ensemble_optuna.log"
@@ -72,5 +74,6 @@ python optimization/expert_ensemble_optuna.py \
     --n-trials-expert "${N_TRIALS_EXPERT}" \
     --per-trial-timeout "${PER_TRIAL_TIMEOUT}" \
     --output-dir "${OUTPUT_DIR}" \
+    --n-jobs "${N_JOBS}" \
     "${EXTRA_ARGS[@]}" \
     2>&1 | tee "${LOG}"

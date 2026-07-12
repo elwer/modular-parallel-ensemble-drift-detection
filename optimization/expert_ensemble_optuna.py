@@ -21,6 +21,7 @@ import signal
 from argparse import ArgumentParser
 from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import optuna
 from optuna.samplers import TPESampler
@@ -429,6 +430,8 @@ def main():
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--profiles", type=str, default=None,
                    help="JSON string defining custom profiles")
+    ap.add_argument("--n-jobs", type=int, default=1,
+                   help="Number of parallel study optimizations")
     args = ap.parse_args()
     
     # Parse generators
@@ -494,35 +497,53 @@ def main():
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Step 2: Train K × 7 experts
+    # Step 2: Train K × 7 experts (parallelized across studies)
     logger.info("=" * 80)
-    logger.info("STEP 2: Training experts")
+    logger.info(f"STEP 2: Training experts ({args.n_jobs} parallel)")
     logger.info("=" * 80)
     
     experts = {}  # (profile_name, detector_type) -> config
     expert_results = []
     
+    expert_tasks = []
     for profile in profiles:
         for detector_type in DETECTOR_TYPES:
-            result = optimize_single_detector_expert(
-                optuna_storage=args.optuna_storage,
-                generators=generators,
-                drift_frequencies=drift_frequencies,
-                stream_length=args.stream_length,
-                stream_seeds=stream_seeds,
-                tolerances=tolerances,
-                profile_name=profile.name,
-                profile_indices=profile_indices[profile.name],
-                detector_type=detector_type,
-                detector_seed=args.seed,
-                n_trials=args.n_trials_expert,
-                per_trial_timeout=args.per_trial_timeout,
-            )
-            
+            expert_tasks.append({
+                'optuna_storage': args.optuna_storage,
+                'generators': generators,
+                'drift_frequencies': drift_frequencies,
+                'stream_length': args.stream_length,
+                'stream_seeds': stream_seeds,
+                'tolerances': tolerances,
+                'profile_name': profile.name,
+                'profile_indices': profile_indices[profile.name],
+                'detector_type': detector_type,
+                'detector_seed': args.seed,
+                'n_trials': args.n_trials_expert,
+                'per_trial_timeout': args.per_trial_timeout,
+            })
+    
+    if args.n_jobs > 1:
+        with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
+            futures = {
+                pool.submit(optimize_single_detector_expert, **task): task
+                for task in expert_tasks
+            }
+            for future in as_completed(futures):
+                task = futures[future]
+                result = future.result()
+                if 'error' not in result:
+                    key = (result['profile_name'], result['detector_type'])
+                    experts[key] = result
+                    expert_results.append(result)
+                    logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
+    else:
+        for task in expert_tasks:
+            result = optimize_single_detector_expert(**task)
             if 'error' not in result:
-                experts[(profile.name, detector_type)] = result
+                experts[(result['profile_name'], result['detector_type'])] = result
                 expert_results.append(result)
-                logger.info(f"Expert {profile.name}_{detector_type}: F1={result['best_trial_value']:.4f}")
+                logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
     
     # Save expert results
     expert_csv = os.path.join(args.output_dir, "experts.csv")
@@ -534,33 +555,49 @@ def main():
                 writer.writerow(result)
     logger.info(f"Expert results saved to {expert_csv}")
     
-    # Step 3: Train 7 generalist detectors
+    # Step 3: Train 7 generalist detectors (parallelized across studies)
     logger.info("=" * 80)
-    logger.info("STEP 3: Training generalist detectors")
+    logger.info(f"STEP 3: Training generalist detectors ({args.n_jobs} parallel)")
     logger.info("=" * 80)
     
     generalists = {}  # detector_type -> config
     generalist_results = []
     
+    generalist_tasks = []
     for detector_type in DETECTOR_TYPES:
-        result = optimize_generalist_detector(
-            optuna_storage=args.optuna_storage,
-            generators=generators,
-            drift_frequencies=drift_frequencies,
-            stream_length=args.stream_length,
-            stream_seeds=stream_seeds,
-            tolerances=tolerances,
-            train_indices=train_indices,
-            detector_type=detector_type,
-            detector_seed=args.seed,
-            n_trials=n_trials_generalist,
-            per_trial_timeout=args.per_trial_timeout,
-        )
-        
-        if 'error' not in result:
-            generalists[detector_type] = result
-            generalist_results.append(result)
-            logger.info(f"Generalist {detector_type}: F1={result['best_trial_value']:.4f}")
+        generalist_tasks.append({
+            'optuna_storage': args.optuna_storage,
+            'generators': generators,
+            'drift_frequencies': drift_frequencies,
+            'stream_length': args.stream_length,
+            'stream_seeds': stream_seeds,
+            'tolerances': tolerances,
+            'train_indices': train_indices,
+            'detector_type': detector_type,
+            'detector_seed': args.seed,
+            'n_trials': n_trials_generalist,
+            'per_trial_timeout': args.per_trial_timeout,
+        })
+    
+    if args.n_jobs > 1:
+        with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
+            futures = {
+                pool.submit(optimize_generalist_detector, **task): task
+                for task in generalist_tasks
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                if 'error' not in result:
+                    generalists[result['detector_type']] = result
+                    generalist_results.append(result)
+                    logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f}")
+    else:
+        for task in generalist_tasks:
+            result = optimize_generalist_detector(**task)
+            if 'error' not in result:
+                generalists[result['detector_type']] = result
+                generalist_results.append(result)
+                logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f}")
     
     # Save generalist results
     generalist_csv = os.path.join(args.output_dir, "generalists.csv")
