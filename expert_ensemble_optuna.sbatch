@@ -63,6 +63,11 @@ if [[ -n "${TOLERANCES:-}" ]]; then
     EXTRA_ARGS+=(--tolerances "${TOLERANCES}")
 fi
 
+RESUME_FLAG=""
+if [[ "${RESUME:-0}" == "1" ]]; then
+    RESUME_FLAG="--resume"
+fi
+
 python optimization/expert_ensemble_optuna.py \
     --optuna-storage "${OPTUNA_STORAGE}" \
     --n-streams "${N_STREAMS}" \
@@ -75,5 +80,6 @@ python optimization/expert_ensemble_optuna.py \
     --per-trial-timeout "${PER_TRIAL_TIMEOUT}" \
     --output-dir "${OUTPUT_DIR}" \
     --n-jobs "${N_JOBS}" \
+    ${RESUME_FLAG} \
     "${EXTRA_ARGS[@]}" \
     2>&1 | tee "${LOG}"

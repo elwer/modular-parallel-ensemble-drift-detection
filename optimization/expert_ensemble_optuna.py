@@ -43,7 +43,10 @@ from optimization.synthetic_f1_multistream_optimize_optuna import (
     apply_suppression,
     evaluate_detections,
     run_ensemble,
+    build_stream,
+    CLASS_PATH,
 )
+from detectors.mopedds.mopedds import MOPEDDS
 
 
 logging.basicConfig(level=logging.INFO,
@@ -128,17 +131,18 @@ def optimize_single_detector_expert(*,
         logger.warning(f"No streams match profile {profile_name}, skipping")
         return {'error': 'no_streams', 'profile_name': profile_name, 'detector_type': detector_type}
     
-    # Create Optuna study
-    import uuid
-    run_id = str(uuid.uuid4())[:8]
-    study_name = f"expert_{profile_name}_{detector_type.lower()}_{run_id}"
+    # Create or resume Optuna study (deterministic name for resumability)
+    study_name = f"expert_{profile_name}_{detector_type.lower()}"
     study = optuna.create_study(
         study_name=study_name,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),
         direction="maximize",
-        load_if_exists=False,
+        load_if_exists=True,
     )
+    existing_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    remaining = max(0, n_trials - existing_trials)
+    logger.info(f"  Study '{study_name}': {existing_trials} existing trials, {remaining} remaining")
     
     def objective(trial: optuna.Trial) -> float:
         # Sample detector hyperparameters
@@ -205,7 +209,10 @@ def optimize_single_detector_expert(*,
             signal.alarm(0)
     
     try:
-        study.optimize(objective, n_trials=n_trials, n_jobs=1, show_progress_bar=True)
+        if remaining > 0:
+            study.optimize(objective, n_trials=remaining, n_jobs=1, show_progress_bar=True)
+        else:
+            logger.info(f"  Study '{study_name}' already complete, skipping optimization")
     except Exception as e:
         logger.warning(f"Optuna optimization failed: {e}")
         return {'error': str(e), 'profile_name': profile_name, 'detector_type': detector_type}
@@ -241,17 +248,18 @@ def optimize_generalist_detector(*,
     logger.info(f"  Train indices: {train_indices}")
     logger.info(f"  Trials: {n_trials}, Timeout: {per_trial_timeout}s")
     
-    # Create Optuna study
-    import uuid
-    run_id = str(uuid.uuid4())[:8]
-    study_name = f"generalist_{detector_type.lower()}_{run_id}"
+    # Create or resume Optuna study (deterministic name for resumability)
+    study_name = f"generalist_{detector_type.lower()}"
     study = optuna.create_study(
         study_name=study_name,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),
         direction="maximize",
-        load_if_exists=False,
+        load_if_exists=True,
     )
+    existing_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    remaining = max(0, n_trials - existing_trials)
+    logger.info(f"  Study '{study_name}': {existing_trials} existing trials, {remaining} remaining")
     
     def objective(trial: optuna.Trial) -> float:
         # Sample detector hyperparameters
@@ -317,7 +325,10 @@ def optimize_generalist_detector(*,
             signal.alarm(0)
     
     try:
-        study.optimize(objective, n_trials=n_trials, n_jobs=1, show_progress_bar=True)
+        if remaining > 0:
+            study.optimize(objective, n_trials=remaining, n_jobs=1, show_progress_bar=True)
+        else:
+            logger.info(f"  Study '{study_name}' already complete, skipping optimization")
     except Exception as e:
         logger.warning(f"Optuna optimization failed: {e}")
         return {'error': str(e), 'detector_type': detector_type}
@@ -335,6 +346,53 @@ def optimize_generalist_detector(*,
     }
 
 
+def _run_mopedds_stream(*, generator_name: str,
+                        drift_frequency: int,
+                        stream_length: int,
+                        stream_seed: int,
+                        tolerance: int,
+                        slot_specs,
+                        detector_seed_base: int,
+                        s_idx: int,
+                        detector_decision_criteria: str = "any",
+                        ensemble_decision_criteria: str = "any",
+                        decision_window: int = 1,
+                        suppression_window: int = 0,
+                        recent_samples_size: int = 100):
+    """Run a single stream through a real MOPEDDS instance and evaluate."""
+    stream = build_stream(generator_name, drift_frequency,
+                          stream_length, stream_seed)
+    known = list(stream.drifts)
+
+    mopedds = MOPEDDS(seed=detector_seed_base + 1000 * s_idx,
+                      recent_samples_size=recent_samples_size)
+    mopedds.detector_decision_criteria = detector_decision_criteria
+    mopedds.ensemble_decision_criteria = ensemble_decision_criteria
+    mopedds.decision_window = decision_window
+    mopedds.suppression_window = suppression_window if suppression_window > 0 else None
+
+    for i, (kind, params) in enumerate(slot_specs):
+        class_path = CLASS_PATH[kind]
+        full_params = dict(params)
+        full_params.setdefault("seed", detector_seed_base + i + 1000 * s_idx)
+        mopedds._init_detector(class_path, **full_params)
+
+    mopedds.deploy()
+    drifts = []
+    try:
+        for i, (x, _y) in enumerate(stream):
+            if mopedds.update(x):
+                drifts.append(i)
+    finally:
+        mopedds.shutdown()
+
+    tp, fp, fn, mean_delay = evaluate_detections(drifts, known, tolerance)
+    f1 = _f1_from_counts(tp, fp, fn)
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    return tp, fp, fn, mean_delay, f1, precision, recall, len(known)
+
+
 def evaluate_ensemble(*,
                       generators: List[str],
                       drift_frequencies: List[int],
@@ -344,25 +402,17 @@ def evaluate_ensemble(*,
                       eval_indices: List[int],
                       expert_configs: List[Dict],
                       detector_seed: int) -> Dict:
-    """Evaluate MoPEDDs ensemble with experts using 'any' criterion."""
+    """Evaluate MoPEDDS ensemble with experts using fixed conservative parameters."""
     logger.info(f"Evaluating ensemble with {len(expert_configs)} experts")
     
     if len(expert_configs) == 0:
         return {'error': 'no_experts'}
     
-    # Build slot specs from expert configs
     slot_specs = []
     for config in expert_configs:
         detector_type = config['detector_type']
         params = config['best_params']
         slot_specs.append((detector_type, params))
-    
-    # Use fixed ensemble parameters
-    detector_criterion = "any"
-    ensemble_criterion = "any"
-    decision_window = 1
-    suppression_window = 0
-    recent_samples_size = 100
     
     tp_total = 0
     fp_total = 0
@@ -373,7 +423,7 @@ def evaluate_ensemble(*,
     per_stream_fn = []
     
     for s_idx in eval_indices:
-        tp, fp, fn, mean_delay, f1, prec, rec, n_known = _run_one_stream(
+        tp, fp, fn, mean_delay, f1, prec, rec, n_known = _run_mopedds_stream(
             generator_name=generators[s_idx],
             drift_frequency=drift_frequencies[s_idx],
             stream_length=stream_length,
@@ -382,11 +432,11 @@ def evaluate_ensemble(*,
             slot_specs=slot_specs,
             detector_seed_base=detector_seed,
             s_idx=s_idx,
-            detector_criterion=detector_criterion,
-            ensemble_criterion=ensemble_criterion,
-            decision_window=decision_window,
-            suppression_window=suppression_window,
-            recent_samples_size=recent_samples_size,
+            detector_decision_criteria="any",
+            ensemble_decision_criteria="any",
+            decision_window=1,
+            suppression_window=0,
+            recent_samples_size=100,
         )
         tp_total += tp
         fp_total += fp
@@ -432,6 +482,8 @@ def main():
                    help="JSON string defining custom profiles")
     ap.add_argument("--n-jobs", type=int, default=1,
                    help="Number of parallel study optimizations")
+    ap.add_argument("--resume", action="store_true",
+                   help="Skip training and load experts/generalists from CSV")
     args = ap.parse_args()
     
     # Parse generators
@@ -497,117 +549,153 @@ def main():
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Step 2: Train K × 7 experts (parallelized across studies)
-    logger.info("=" * 80)
-    logger.info(f"STEP 2: Training experts ({args.n_jobs} parallel)")
-    logger.info("=" * 80)
+    expert_csv = os.path.join(args.output_dir, "experts.csv")
+    generalist_csv = os.path.join(args.output_dir, "generalists.csv")
     
     experts = {}  # (profile_name, detector_type) -> config
     expert_results = []
+    generalists = {}  # detector_type -> config
+    generalist_results = []
     
-    expert_tasks = []
-    for profile in profiles:
+    if args.resume:
+        # Load experts from CSV
+        if os.path.exists(expert_csv):
+            logger.info("=" * 80)
+            logger.info(f"RESUME: Loading experts from {expert_csv}")
+            logger.info("=" * 80)
+            with open(expert_csv, 'r') as f:
+                for row in csv.DictReader(f):
+                    row['best_params'] = json.loads(row['best_params'])
+                    row['best_trial_value'] = float(row['best_trial_value'])
+                    experts[(row['profile_name'], row['detector_type'])] = dict(row)
+                    expert_results.append(dict(row))
+            logger.info(f"  Loaded {len(experts)} experts")
+        else:
+            logger.warning(f"  {expert_csv} not found, will train experts from scratch")
+        
+        # Load generalists from CSV
+        if os.path.exists(generalist_csv):
+            logger.info("=" * 80)
+            logger.info(f"RESUME: Loading generalists from {generalist_csv}")
+            logger.info("=" * 80)
+            with open(generalist_csv, 'r') as f:
+                for row in csv.DictReader(f):
+                    row['best_params'] = json.loads(row['best_params'])
+                    row['best_trial_value'] = float(row['best_trial_value'])
+                    generalists[row['detector_type']] = dict(row)
+                    generalist_results.append(dict(row))
+            logger.info(f"  Loaded {len(generalists)} generalists")
+        else:
+            logger.warning(f"  {generalist_csv} not found, will train generalists from scratch")
+    
+    # Step 2: Train experts (skip if already loaded)
+    if len(experts) == 0:
+        logger.info("=" * 80)
+        logger.info(f"STEP 2: Training experts ({args.n_jobs} parallel)")
+        logger.info("=" * 80)
+        
+        expert_tasks = []
+        for profile in profiles:
+            for detector_type in DETECTOR_TYPES:
+                expert_tasks.append({
+                    'optuna_storage': args.optuna_storage,
+                    'generators': generators,
+                    'drift_frequencies': drift_frequencies,
+                    'stream_length': args.stream_length,
+                    'stream_seeds': stream_seeds,
+                    'tolerances': tolerances,
+                    'profile_name': profile.name,
+                    'profile_indices': profile_indices[profile.name],
+                    'detector_type': detector_type,
+                    'detector_seed': args.seed,
+                    'n_trials': args.n_trials_expert,
+                    'per_trial_timeout': args.per_trial_timeout,
+                })
+        
+        if args.n_jobs > 1:
+            with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
+                futures = {
+                    pool.submit(optimize_single_detector_expert, **task): task
+                    for task in expert_tasks
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    if 'error' not in result:
+                        key = (result['profile_name'], result['detector_type'])
+                        experts[key] = result
+                        expert_results.append(result)
+                        logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
+        else:
+            for task in expert_tasks:
+                result = optimize_single_detector_expert(**task)
+                if 'error' not in result:
+                    experts[(result['profile_name'], result['detector_type'])] = result
+                    expert_results.append(result)
+                    logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
+        
+        # Save expert results (best_params as JSON string)
+        with open(expert_csv, 'w', newline='') as f:
+            if expert_results:
+                writer = csv.DictWriter(f, fieldnames=expert_results[0].keys())
+                writer.writeheader()
+                for result in expert_results:
+                    row = dict(result)
+                    row['best_params'] = json.dumps(row['best_params'])
+                    writer.writerow(row)
+        logger.info(f"Expert results saved to {expert_csv}")
+    
+    # Step 3: Train generalists (skip if already loaded)
+    if len(generalists) == 0:
+        logger.info("=" * 80)
+        logger.info(f"STEP 3: Training generalist detectors ({args.n_jobs} parallel)")
+        logger.info("=" * 80)
+        
+        generalist_tasks = []
         for detector_type in DETECTOR_TYPES:
-            expert_tasks.append({
+            generalist_tasks.append({
                 'optuna_storage': args.optuna_storage,
                 'generators': generators,
                 'drift_frequencies': drift_frequencies,
                 'stream_length': args.stream_length,
                 'stream_seeds': stream_seeds,
                 'tolerances': tolerances,
-                'profile_name': profile.name,
-                'profile_indices': profile_indices[profile.name],
+                'train_indices': train_indices,
                 'detector_type': detector_type,
                 'detector_seed': args.seed,
-                'n_trials': args.n_trials_expert,
+                'n_trials': n_trials_generalist,
                 'per_trial_timeout': args.per_trial_timeout,
             })
-    
-    if args.n_jobs > 1:
-        with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
-            futures = {
-                pool.submit(optimize_single_detector_expert, **task): task
-                for task in expert_tasks
-            }
-            for future in as_completed(futures):
-                task = futures[future]
-                result = future.result()
-                if 'error' not in result:
-                    key = (result['profile_name'], result['detector_type'])
-                    experts[key] = result
-                    expert_results.append(result)
-                    logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
-    else:
-        for task in expert_tasks:
-            result = optimize_single_detector_expert(**task)
-            if 'error' not in result:
-                experts[(result['profile_name'], result['detector_type'])] = result
-                expert_results.append(result)
-                logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
-    
-    # Save expert results
-    expert_csv = os.path.join(args.output_dir, "experts.csv")
-    with open(expert_csv, 'w', newline='') as f:
-        if expert_results:
-            writer = csv.DictWriter(f, fieldnames=expert_results[0].keys())
-            writer.writeheader()
-            for result in expert_results:
-                writer.writerow(result)
-    logger.info(f"Expert results saved to {expert_csv}")
-    
-    # Step 3: Train 7 generalist detectors (parallelized across studies)
-    logger.info("=" * 80)
-    logger.info(f"STEP 3: Training generalist detectors ({args.n_jobs} parallel)")
-    logger.info("=" * 80)
-    
-    generalists = {}  # detector_type -> config
-    generalist_results = []
-    
-    generalist_tasks = []
-    for detector_type in DETECTOR_TYPES:
-        generalist_tasks.append({
-            'optuna_storage': args.optuna_storage,
-            'generators': generators,
-            'drift_frequencies': drift_frequencies,
-            'stream_length': args.stream_length,
-            'stream_seeds': stream_seeds,
-            'tolerances': tolerances,
-            'train_indices': train_indices,
-            'detector_type': detector_type,
-            'detector_seed': args.seed,
-            'n_trials': n_trials_generalist,
-            'per_trial_timeout': args.per_trial_timeout,
-        })
-    
-    if args.n_jobs > 1:
-        with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
-            futures = {
-                pool.submit(optimize_generalist_detector, **task): task
-                for task in generalist_tasks
-            }
-            for future in as_completed(futures):
-                result = future.result()
+        
+        if args.n_jobs > 1:
+            with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
+                futures = {
+                    pool.submit(optimize_generalist_detector, **task): task
+                    for task in generalist_tasks
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    if 'error' not in result:
+                        generalists[result['detector_type']] = result
+                        generalist_results.append(result)
+                        logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f}")
+        else:
+            for task in generalist_tasks:
+                result = optimize_generalist_detector(**task)
                 if 'error' not in result:
                     generalists[result['detector_type']] = result
                     generalist_results.append(result)
                     logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f}")
-    else:
-        for task in generalist_tasks:
-            result = optimize_generalist_detector(**task)
-            if 'error' not in result:
-                generalists[result['detector_type']] = result
-                generalist_results.append(result)
-                logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f}")
-    
-    # Save generalist results
-    generalist_csv = os.path.join(args.output_dir, "generalists.csv")
-    with open(generalist_csv, 'w', newline='') as f:
-        if generalist_results:
-            writer = csv.DictWriter(f, fieldnames=generalist_results[0].keys())
-            writer.writeheader()
-            for result in generalist_results:
-                writer.writerow(result)
-    logger.info(f"Generalist results saved to {generalist_csv}")
+        
+        # Save generalist results (best_params as JSON string)
+        with open(generalist_csv, 'w', newline='') as f:
+            if generalist_results:
+                writer = csv.DictWriter(f, fieldnames=generalist_results[0].keys())
+                writer.writeheader()
+                for result in generalist_results:
+                    row = dict(result)
+                    row['best_params'] = json.dumps(row['best_params'])
+                    writer.writerow(row)
+        logger.info(f"Generalist results saved to {generalist_csv}")
     
     # Step 4: Evaluation Phase 1 - Per-DD ensembles
     logger.info("=" * 80)
