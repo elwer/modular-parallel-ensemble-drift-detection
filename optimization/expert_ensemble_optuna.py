@@ -346,6 +346,30 @@ def optimize_generalist_detector(*,
     }
 
 
+def _append_result_csv(csv_path: str, result: Dict, is_first: bool):
+    """Append a single result row to CSV, writing header if file is new."""
+    row = dict(result)
+    row['best_params'] = json.dumps(row['best_params'])
+    file_exists = os.path.exists(csv_path)
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=row.keys())
+        if not file_exists or is_first:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def _rewrite_csv(csv_path: str, results: List[Dict]):
+    """Rewrite entire CSV with all results (for clean final output)."""
+    with open(csv_path, 'w', newline='') as f:
+        if results:
+            writer = csv.DictWriter(f, fieldnames=results[0].keys())
+            writer.writeheader()
+            for result in results:
+                row = dict(result)
+                row['best_params'] = json.dumps(row['best_params'])
+                writer.writerow(row)
+
+
 def _run_mopedds_stream(*, generator_name: str,
                         drift_frequency: int,
                         stream_length: int,
@@ -613,36 +637,37 @@ def main():
                 })
         
         if args.n_jobs > 1:
+            if os.path.exists(expert_csv):
+                os.remove(expert_csv)
             with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
                 futures = {
                     pool.submit(optimize_single_detector_expert, **task): task
                     for task in expert_tasks
                 }
+                first_done = True
                 for future in as_completed(futures):
                     result = future.result()
                     if 'error' not in result:
                         key = (result['profile_name'], result['detector_type'])
                         experts[key] = result
                         expert_results.append(result)
-                        logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
+                        _append_result_csv(expert_csv, result, first_done)
+                        first_done = False
+                        logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f} (saved to CSV)")
         else:
+            if os.path.exists(expert_csv):
+                os.remove(expert_csv)
+            first_done = True
             for task in expert_tasks:
                 result = optimize_single_detector_expert(**task)
                 if 'error' not in result:
                     experts[(result['profile_name'], result['detector_type'])] = result
                     expert_results.append(result)
-                    logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f}")
+                    _append_result_csv(expert_csv, result, first_done)
+                    first_done = False
+                    logger.info(f"Expert {result['profile_name']}_{result['detector_type']}: F1={result['best_trial_value']:.4f} (saved to CSV)")
         
-        # Save expert results (best_params as JSON string)
-        with open(expert_csv, 'w', newline='') as f:
-            if expert_results:
-                writer = csv.DictWriter(f, fieldnames=expert_results[0].keys())
-                writer.writeheader()
-                for result in expert_results:
-                    row = dict(result)
-                    row['best_params'] = json.dumps(row['best_params'])
-                    writer.writerow(row)
-        logger.info(f"Expert results saved to {expert_csv}")
+        logger.info(f"Expert results saved to {expert_csv} ({len(expert_results)} experts)")
     
     # Step 3: Train generalists (skip if already loaded)
     if len(generalists) == 0:
@@ -667,35 +692,36 @@ def main():
             })
         
         if args.n_jobs > 1:
+            if os.path.exists(generalist_csv):
+                os.remove(generalist_csv)
             with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
                 futures = {
                     pool.submit(optimize_generalist_detector, **task): task
                     for task in generalist_tasks
                 }
+                first_done = True
                 for future in as_completed(futures):
                     result = future.result()
                     if 'error' not in result:
                         generalists[result['detector_type']] = result
                         generalist_results.append(result)
-                        logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f}")
+                        _append_result_csv(generalist_csv, result, first_done)
+                        first_done = False
+                        logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f} (saved to CSV)")
         else:
+            if os.path.exists(generalist_csv):
+                os.remove(generalist_csv)
+            first_done = True
             for task in generalist_tasks:
                 result = optimize_generalist_detector(**task)
                 if 'error' not in result:
                     generalists[result['detector_type']] = result
                     generalist_results.append(result)
-                    logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f}")
+                    _append_result_csv(generalist_csv, result, first_done)
+                    first_done = False
+                    logger.info(f"Generalist {result['detector_type']}: F1={result['best_trial_value']:.4f} (saved to CSV)")
         
-        # Save generalist results (best_params as JSON string)
-        with open(generalist_csv, 'w', newline='') as f:
-            if generalist_results:
-                writer = csv.DictWriter(f, fieldnames=generalist_results[0].keys())
-                writer.writeheader()
-                for result in generalist_results:
-                    row = dict(result)
-                    row['best_params'] = json.dumps(row['best_params'])
-                    writer.writerow(row)
-        logger.info(f"Generalist results saved to {generalist_csv}")
+        logger.info(f"Generalist results saved to {generalist_csv} ({len(generalist_results)} generalists)")
     
     # Step 4: Evaluation Phase 1 - Per-DD ensembles
     logger.info("=" * 80)
