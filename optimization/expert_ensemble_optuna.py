@@ -349,7 +349,8 @@ def optimize_generalist_detector(*,
 def _append_result_csv(csv_path: str, result: Dict, is_first: bool):
     """Append a single result row to CSV, writing header if file is new."""
     row = dict(result)
-    row['best_params'] = json.dumps(row['best_params'])
+    if 'best_params' in row:
+        row['best_params'] = json.dumps(row['best_params'])
     file_exists = os.path.exists(csv_path)
     with open(csv_path, 'a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=row.keys())
@@ -398,7 +399,7 @@ def _run_mopedds_stream(*, generator_name: str,
     for i, (kind, params) in enumerate(slot_specs):
         class_path = CLASS_PATH[kind]
         full_params = dict(params)
-        full_params.setdefault("seed", detector_seed_base + i + 1000 * s_idx)
+        full_params.pop("seed", None)  # _init_detector passes seed=self.seed
         mopedds._init_detector(class_path, **full_params)
 
     mopedds.deploy()
