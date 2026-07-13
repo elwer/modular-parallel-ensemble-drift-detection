@@ -35,7 +35,7 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
-OPTUNA_STORAGE="${OPTUNA_STORAGE:-sqlite:///expert_ensemble_optuna.db}"
+OPTUNA_STORAGE="${OPTUNA_STORAGE:-sqlite:///split_pipeline/split_pipeline_optuna.db}"
 DETECTOR_TYPE="${DETECTOR_TYPE:-IBDD}"
 N_STREAMS="${N_STREAMS:-10}"
 BASE_STREAM_SEED="${BASE_STREAM_SEED:-42}"
@@ -44,9 +44,9 @@ STREAM_LENGTH="${STREAM_LENGTH:-8000}"
 EVAL_STREAM_INDICES="${EVAL_STREAM_INDICES:-1,4,8}"
 GENERATORS="${GENERATORS:-SineClusters}"
 SEED="${SEED:-1337}"
-N_TRIALS="${N_TRIALS:-350}"
+N_TRIALS="${N_TRIALS:-700}"
 PER_TRIAL_TIMEOUT="${PER_TRIAL_TIMEOUT:-1200}"
-OUTPUT_DIR="${OUTPUT_DIR:-expert_ensemble_results}"
+OUTPUT_DIR="${OUTPUT_DIR:-split_pipeline/results}"
 
 mkdir -p "${OUTPUT_DIR}"
 LOG="${OUTPUT_DIR}/generalist_optimize_${DETECTOR_TYPE}.log"

@@ -135,6 +135,7 @@ def main():
             'detector_seed': args.seed,
             'n_trials': args.n_trials_expert,
             'per_trial_timeout': args.per_trial_timeout,
+            'load_if_exists': False,
         })
 
     experts = {}  # profile_name -> result dict

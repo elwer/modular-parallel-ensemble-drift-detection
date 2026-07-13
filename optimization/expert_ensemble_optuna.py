@@ -121,7 +121,8 @@ def optimize_single_detector_expert(*,
                                    detector_type: str,
                                    detector_seed: int,
                                    n_trials: int = 50,
-                                   per_trial_timeout: int = 1200) -> Dict:
+                                   per_trial_timeout: int = 1200,
+                                   load_if_exists: bool = True) -> Dict:
     """Optimize a single detector expert for a specific profile."""
     logger.info(f"Optimizing {detector_type} expert for profile {profile_name}")
     logger.info(f"  Profile indices: {profile_indices}")
@@ -138,7 +139,7 @@ def optimize_single_detector_expert(*,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),
         direction="maximize",
-        load_if_exists=True,
+        load_if_exists=load_if_exists,
     )
     existing_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
     remaining = max(0, n_trials - existing_trials)
@@ -242,7 +243,8 @@ def optimize_generalist_detector(*,
                                  detector_type: str,
                                  detector_seed: int,
                                  n_trials: int,
-                                 per_trial_timeout: int = 1200) -> Dict:
+                                 per_trial_timeout: int = 1200,
+                                 load_if_exists: bool = True) -> Dict:
     """Optimize a generalist detector on all streams."""
     logger.info(f"Optimizing generalist {detector_type}")
     logger.info(f"  Train indices: {train_indices}")
@@ -255,7 +257,7 @@ def optimize_generalist_detector(*,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),
         direction="maximize",
-        load_if_exists=True,
+        load_if_exists=load_if_exists,
     )
     existing_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
     remaining = max(0, n_trials - existing_trials)

@@ -16,7 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Configuration
-OPTUNA_STORAGE="sqlite:///expert_ensemble_optuna.db"
+OPTUNA_STORAGE="sqlite:///split_pipeline/split_pipeline_optuna.db"
 N_STREAMS=10
 BASE_STREAM_SEED=42
 DRIFT_FREQUENCIES="200,400,500,750,1000,1250,1500,2000,2500,3000"
@@ -24,12 +24,12 @@ STREAM_LENGTH=8000
 EVAL_STREAM_INDICES="1,4,8"
 GENERATORS="SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2"
 SEED=1337
-N_TRIALS_EXPERT=50
+N_TRIALS_EXPERT=100
 PER_TRIAL_TIMEOUT=1200
-OUTPUT_DIR="expert_ensemble_results"
+OUTPUT_DIR="split_pipeline/results"
 N_JOBS_EXPERT=7
 
-# Generalist: K profiles * N_TRIALS_EXPERT = 7 * 50 = 350
+# Generalist: K profiles * N_TRIALS_EXPERT = 7 * 100 = 700
 N_PROFILES=7
 N_TRIALS_GENERALIST=$((N_PROFILES * N_TRIALS_EXPERT))
 
