@@ -1,18 +1,20 @@
 """
-Expert-only optimization: train K x 7 single-detector experts in parallel.
+Expert optimization + per-DD ensemble evaluation for a single detector type.
 
-This script only runs expert optimization (no generalist training, no evaluation).
-Results are stored in the Optuna DB and a CSV summary is written.
+Optimizes K profile-experts for one DD type (7 studies × 50 trials each),
+then evaluates the per-DD ensemble (all K experts together) on the eval set.
+Designed to be submitted as one SLURM job per detector type (7 jobs total).
 
 Usage:
-    python optimization/expert_optimize.py \
+    python split_pipeline/expert_optimize.py \
         --optuna-storage sqlite:///expert_ensemble_optuna.db \
+        --detector-type BNDM \
         --n-streams 10 --base-stream-seed 42 \
         --drift-frequencies 200,400,500,750,1000,1250,1500,2000,2500,3000 \
         --stream-length 8000 --eval-stream-indices 1,4,8 \
         --generators SineClusters,WaveformDrift2,... \
         --n-trials-expert 50 --per-trial-timeout 1200 \
-        --n-jobs 8 --output-dir expert_ensemble_results
+        --n-jobs 7 --output-dir expert_ensemble_results
 """
 
 import os
@@ -35,6 +37,7 @@ from optimization.expert_ensemble_optuna import (
     DETECTOR_TYPES,
     get_profile_indices,
     optimize_single_detector_expert,
+    evaluate_ensemble,
     _append_result_csv,
 )
 
@@ -44,8 +47,9 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    ap = ArgumentParser(description="Expert-only optimization (parallelized across profiles)")
+    ap = ArgumentParser(description="Expert-only optimization for a single DD type")
     ap.add_argument("--optuna-storage", required=True)
+    ap.add_argument("--detector-type", required=True, choices=DETECTOR_TYPES)
     ap.add_argument("--n-streams", type=int, required=True)
     ap.add_argument("--base-stream-seed", type=int, required=True)
     ap.add_argument("--drift-frequencies", type=str, required=True)
@@ -61,8 +65,8 @@ def main():
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--profiles", type=str, default=None,
                    help="JSON string defining custom profiles")
-    ap.add_argument("--n-jobs", type=int, default=1,
-                   help="Number of parallel study optimizations")
+    ap.add_argument("--n-jobs", type=int, default=7,
+                   help="Number of parallel profile optimizations (default: 7 = one per profile)")
     args = ap.parse_args()
 
     # Parse generators
@@ -92,7 +96,7 @@ def main():
         profiles = DEFAULT_PROFILES
 
     logger.info("=" * 80)
-    logger.info("Expert-only optimization")
+    logger.info(f"Expert optimization: {args.detector_type}")
     logger.info("=" * 80)
     logger.info(f"  Generators: {generators}")
     logger.info(f"  Drift frequencies: {drift_frequencies}")
@@ -115,29 +119,26 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     expert_csv = os.path.join(args.output_dir, "experts.csv")
 
-    # Build expert tasks
+    # Build expert tasks: all profiles for this single DD type
     expert_tasks = []
     for profile in profiles:
-        for detector_type in DETECTOR_TYPES:
-            expert_tasks.append({
-                'optuna_storage': args.optuna_storage,
-                'generators': generators,
-                'drift_frequencies': drift_frequencies,
-                'stream_length': args.stream_length,
-                'stream_seeds': stream_seeds,
-                'tolerances': tolerances,
-                'profile_name': profile.name,
-                'profile_indices': profile_indices[profile.name],
-                'detector_type': detector_type,
-                'detector_seed': args.seed,
-                'n_trials': args.n_trials_expert,
-                'per_trial_timeout': args.per_trial_timeout,
-            })
+        expert_tasks.append({
+            'optuna_storage': args.optuna_storage,
+            'generators': generators,
+            'drift_frequencies': drift_frequencies,
+            'stream_length': args.stream_length,
+            'stream_seeds': stream_seeds,
+            'tolerances': tolerances,
+            'profile_name': profile.name,
+            'profile_indices': profile_indices[profile.name],
+            'detector_type': args.detector_type,
+            'detector_seed': args.seed,
+            'n_trials': args.n_trials_expert,
+            'per_trial_timeout': args.per_trial_timeout,
+        })
 
-    logger.info(f"Total expert tasks: {len(expert_tasks)}")
-
-    if os.path.exists(expert_csv):
-        os.remove(expert_csv)
+    experts = {}  # profile_name -> result dict
+    logger.info(f"Total expert tasks: {len(expert_tasks)} (profiles for {args.detector_type})")
 
     if args.n_jobs > 1:
         with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
@@ -149,6 +150,7 @@ def main():
             for future in as_completed(futures):
                 result = future.result()
                 if 'error' not in result:
+                    experts[result['profile_name']] = result
                     _append_result_csv(expert_csv, result, first_done)
                     first_done = False
                     logger.info(
@@ -159,6 +161,7 @@ def main():
         for task in expert_tasks:
             result = optimize_single_detector_expert(**task)
             if 'error' not in result:
+                experts[result['profile_name']] = result
                 _append_result_csv(expert_csv, result, first_done)
                 first_done = False
                 logger.info(
@@ -166,7 +169,39 @@ def main():
                     f"F1={result['best_trial_value']:.4f} (saved)")
 
     logger.info(f"Expert results saved to {expert_csv}")
-    logger.info("Expert optimization complete.")
+
+    # ------------------------------------------------------------------
+    # Evaluate per-DD ensemble (all K experts together) on eval set
+    # ------------------------------------------------------------------
+    logger.info("=" * 80)
+    logger.info(f"Evaluating per-DD ensemble for {args.detector_type}")
+    logger.info("=" * 80)
+
+    expert_configs = list(experts.values())
+    if len(expert_configs) == 0:
+        logger.warning("No experts available, skipping ensemble evaluation")
+        return
+
+    ens_result = evaluate_ensemble(
+        generators=generators,
+        drift_frequencies=drift_frequencies,
+        stream_length=args.stream_length,
+        stream_seeds=stream_seeds,
+        tolerances=tolerances,
+        eval_indices=eval_indices,
+        expert_configs=expert_configs,
+        detector_seed=args.seed,
+    )
+    ens_result['detector_type'] = args.detector_type
+    ens_result['ensemble_type'] = 'per_dd'
+
+    phase1_csv = os.path.join(args.output_dir, "phase1_per_dd_ensembles.csv")
+    is_first = not os.path.exists(phase1_csv)
+    _append_result_csv(phase1_csv, ens_result, is_first)
+    logger.info(f"Per-DD ensemble {args.detector_type}: "
+                f"macroF1={ens_result['macro_f1']:.4f} (saved to {phase1_csv})")
+
+    logger.info("Expert optimization + evaluation complete.")
 
 
 if __name__ == "__main__":

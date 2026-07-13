@@ -1,5 +1,5 @@
 #!/bin/bash
-# SLURM template for expert-only optimization (parallelized across profiles).
+# SLURM template for expert optimization + per-DD ensemble evaluation.
 #
 # Required env vars (set via sbatch --export):
 #   OPTUNA_STORAGE        Optuna storage URL
@@ -13,12 +13,13 @@
 #   N_TRIALS_EXPERT       Number of trials per expert (default: 50)
 #   PER_TRIAL_TIMEOUT     Per-trial timeout in seconds (default: 1200)
 #   OUTPUT_DIR            Output directory
-#   N_JOBS                Number of parallel study optimizations
+#   DETECTOR_TYPE         Detector type (IBDD, OCDD, D3, SPLL, UDetect, CSDDM, BNDM)
+#   N_JOBS                Number of parallel profile optimizations (default: 7)
 
-#SBATCH --job-name=ExpertOpt
+#SBATCH --job-name=ExpOpt_${DETECTOR_TYPE}
 #SBATCH --cpu-freq=2000000
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=7
 #SBATCH --ntasks=1
 #SBATCH --time=48:00:00
 #SBATCH --mem-per-cpu=8192
@@ -36,6 +37,7 @@ export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
 OPTUNA_STORAGE="${OPTUNA_STORAGE:-sqlite:///expert_ensemble_optuna.db}"
+DETECTOR_TYPE="${DETECTOR_TYPE:-BNDM}"
 N_STREAMS="${N_STREAMS:-10}"
 BASE_STREAM_SEED="${BASE_STREAM_SEED:-42}"
 DRIFT_FREQUENCIES="${DRIFT_FREQUENCIES:-200,400,500,750,1000,1250,1500,2000,2500,3000}"
@@ -46,10 +48,10 @@ SEED="${SEED:-1337}"
 N_TRIALS_EXPERT="${N_TRIALS_EXPERT:-50}"
 PER_TRIAL_TIMEOUT="${PER_TRIAL_TIMEOUT:-1200}"
 OUTPUT_DIR="${OUTPUT_DIR:-expert_ensemble_results}"
-N_JOBS="${N_JOBS:-8}"
+N_JOBS="${N_JOBS:-7}"
 
 mkdir -p "${OUTPUT_DIR}"
-LOG="${OUTPUT_DIR}/expert_optimize.log"
+LOG="${OUTPUT_DIR}/expert_optimize_${DETECTOR_TYPE}.log"
 
 EXTRA_ARGS=()
 if [[ -n "${GENERATORS:-}" ]]; then
@@ -66,6 +68,7 @@ fi
 
 python "${PIPELINE_DIR}/expert_optimize.py" \
     --optuna-storage "${OPTUNA_STORAGE}" \
+    --detector-type "${DETECTOR_TYPE}" \
     --n-streams "${N_STREAMS}" \
     --base-stream-seed "${BASE_STREAM_SEED}" \
     --drift-frequencies "${DRIFT_FREQUENCIES}" \

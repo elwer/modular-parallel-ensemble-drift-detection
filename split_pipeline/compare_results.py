@@ -1,22 +1,22 @@
 """
-Evaluate expert ensembles and generalists from Optuna DB.
+Compare results across all DD types and build the cross-DD best ensemble.
 
-Loads best trials from the Optuna DB and runs:
-  Phase 1: Per-DD ensembles (K experts of same DD type)
-  Phase 2: Cross-DD best experts (best expert per profile across all DD types)
-  Phase 3: Generalist single-detector evaluation on eval set
+Loads expert and generalist results from the Optuna DB, then:
+  1. Prints a comparison table of per-DD ensembles vs generalists
+  2. Builds the cross-DD best ensemble (best expert per profile across all DD types)
+  3. Evaluates it on the eval set
+  4. Saves everything to CSV
 
-This script does NO optimization. It should be submitted after all
-expert and generalist optimization jobs have completed.
+Run this after all expert and generalist jobs have completed.
 
 Usage:
-    python optimization/evaluate_ensembles.py \
+    python split_pipeline/compare_results.py \
         --optuna-storage sqlite:///expert_ensemble_optuna.db \
         --n-streams 10 --base-stream-seed 42 \
         --drift-frequencies 200,400,500,750,1000,1250,1500,2000,2500,3000 \
         --stream-length 8000 --eval-stream-indices 1,4,8 \
         --generators SineClusters,WaveformDrift2,... \
-        --n-trials-expert 50 --output-dir expert_ensemble_results
+        --output-dir expert_ensemble_results
 """
 
 import os
@@ -25,8 +25,6 @@ import csv
 import json
 import logging
 from argparse import ArgumentParser
-
-import optuna
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -40,7 +38,6 @@ from optimization.expert_ensemble_optuna import (
     DETECTOR_TYPES,
     evaluate_ensemble,
     _append_result_csv,
-    _rewrite_csv,
 )
 from optimization.evaluate_from_optuna import (
     load_expert_from_study,
@@ -53,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    ap = ArgumentParser(description="Evaluate expert ensembles and generalists from Optuna DB")
+    ap = ArgumentParser(description="Compare results and build cross-DD best ensemble")
     ap.add_argument("--optuna-storage", required=True)
     ap.add_argument("--n-streams", type=int, required=True)
     ap.add_argument("--base-stream-seed", type=int, required=True)
@@ -65,7 +62,6 @@ def main():
     ap.add_argument("--generators", type=str, default=None)
     ap.add_argument("--generator", type=str, default=None)
     ap.add_argument("--seed", type=int, default=1337)
-    ap.add_argument("--n-trials-expert", type=int, default=50)
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--profiles", type=str, default=None)
     args = ap.parse_args()
@@ -97,21 +93,14 @@ def main():
         profiles = DEFAULT_PROFILES
 
     logger.info("=" * 80)
-    logger.info("Evaluate ensembles from Optuna DB")
+    logger.info("Cross-DD comparison and best-of-all ensemble")
     logger.info("=" * 80)
-    logger.info(f"  Storage: {args.optuna_storage}")
-    logger.info(f"  Eval indices: {eval_indices}")
-    logger.info(f"  Profiles: {[p.name for p in profiles]}")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
-    # Load experts from DB
+    # Load all experts from DB
     # ------------------------------------------------------------------
-    logger.info("=" * 80)
-    logger.info("Loading experts from Optuna DB")
-    logger.info("=" * 80)
-
     all_experts = {}
     for detector_type in DETECTOR_TYPES:
         for profile in profiles:
@@ -120,93 +109,73 @@ def main():
                 args.optuna_storage, profile.name, detector_type)
             if result is not None:
                 all_experts[key] = result
-                logger.info(
-                    f"  Loaded expert {profile.name}_{detector_type}: "
-                    f"F1={result['best_trial_value']:.4f} "
-                    f"({result['n_completed_trials']} trials)")
-            else:
-                logger.warning(
-                    f"  Expert {profile.name}_{detector_type} not found in DB")
 
-    # Save experts CSV
-    expert_csv = os.path.join(args.output_dir, "experts.csv")
-    expert_results = list(all_experts.values())
-    _rewrite_csv(expert_csv, expert_results)
-    logger.info(f"Experts CSV saved to {expert_csv} ({len(expert_results)} experts)")
+    logger.info(f"Loaded {len(all_experts)} experts from DB")
 
     # ------------------------------------------------------------------
-    # Load generalists from DB
+    # Load all generalists from DB
     # ------------------------------------------------------------------
-    logger.info("=" * 80)
-    logger.info("Loading generalists from Optuna DB")
-    logger.info("=" * 80)
-
     all_generalists = {}
     for detector_type in DETECTOR_TYPES:
         result = load_generalist_from_study(
             args.optuna_storage, detector_type)
         if result is not None:
             all_generalists[detector_type] = result
-            logger.info(
-                f"  Loaded generalist {detector_type}: "
-                f"F1={result['best_trial_value']:.4f} "
-                f"({result['n_completed_trials']} trials)")
-        else:
-            logger.warning(
-                f"  Generalist {detector_type} not found in DB")
 
-    # Save generalists CSV
-    generalist_csv = os.path.join(args.output_dir, "generalists.csv")
-    generalist_results = list(all_generalists.values())
-    _rewrite_csv(generalist_csv, generalist_results)
-    logger.info(f"Generalists CSV saved to {generalist_csv} ({len(generalist_results)} generalists)")
+    logger.info(f"Loaded {len(all_generalists)} generalists from DB")
 
     # ------------------------------------------------------------------
-    # Phase 1: Per-DD ensembles
+    # Print comparison table
     # ------------------------------------------------------------------
-    logger.info("=" * 80)
-    logger.info("Phase 1: Per-DD ensembles")
-    logger.info("=" * 80)
-
-    phase1_results = []
-    phase1_csv = os.path.join(args.output_dir, "phase1_per_dd_ensembles.csv")
-    if os.path.exists(phase1_csv):
-        os.remove(phase1_csv)
+    print("\n" + "=" * 80)
+    print("COMPARISON TABLE")
+    print("=" * 80)
+    print(f"{'DD Type':<12} {'Expert Train F1':>16} {'Generalist Train F1':>20}")
+    print("-" * 50)
 
     for detector_type in DETECTOR_TYPES:
-        expert_configs = []
+        # Best expert train F1 for this DD type
+        expert_f1s = []
         for profile in profiles:
             key = (profile.name, detector_type)
             if key in all_experts:
-                expert_configs.append(all_experts[key])
+                expert_f1s.append(all_experts[key]['best_trial_value'])
+        expert_str = f"{sum(expert_f1s)/len(expert_f1s):.4f}" if expert_f1s else "N/A"
 
-        if len(expert_configs) == 0:
-            logger.warning(f"No experts found for {detector_type}, skipping")
-            continue
+        # Generalist train F1
+        gen_str = f"{all_generalists[detector_type]['best_trial_value']:.4f}" \
+            if detector_type in all_generalists else "N/A"
 
-        result = evaluate_ensemble(
-            generators=generators,
-            drift_frequencies=drift_frequencies,
-            stream_length=args.stream_length,
-            stream_seeds=stream_seeds,
-            tolerances=tolerances,
-            eval_indices=eval_indices,
-            expert_configs=expert_configs,
-            detector_seed=args.seed,
-        )
-        result['detector_type'] = detector_type
-        result['ensemble_type'] = 'per_dd'
-        phase1_results.append(result)
-        _append_result_csv(phase1_csv, result, len(phase1_results) == 1)
-        logger.info(f"Per-DD ensemble {detector_type}: macroF1={result['macro_f1']:.4f}")
+        print(f"{detector_type:<12} {expert_str:>16} {gen_str:>20}")
 
-    logger.info(f"Phase 1 results saved to {phase1_csv}")
+    # Load per-DD ensemble eval results from CSV if available
+    phase1_csv = os.path.join(args.output_dir, "phase1_per_dd_ensembles.csv")
+    gen_eval_csv = os.path.join(args.output_dir, "generalists_eval.csv")
+
+    per_dd_eval = {}
+    if os.path.exists(phase1_csv):
+        with open(phase1_csv) as f:
+            for row in csv.DictReader(f):
+                per_dd_eval[row['detector_type']] = float(row['macro_f1'])
+
+    gen_eval = {}
+    if os.path.exists(gen_eval_csv):
+        with open(gen_eval_csv) as f:
+            for row in csv.DictReader(f):
+                gen_eval[row['detector_type']] = float(row['macro_f1'])
+
+    print(f"\n{'DD Type':<12} {'Per-DD Ens Eval F1':>18} {'Generalist Eval F1':>20}")
+    print("-" * 52)
+    for detector_type in DETECTOR_TYPES:
+        ens_str = f"{per_dd_eval[detector_type]:.4f}" if detector_type in per_dd_eval else "N/A"
+        gen_str = f"{gen_eval[detector_type]:.4f}" if detector_type in gen_eval else "N/A"
+        print(f"{detector_type:<12} {ens_str:>18} {gen_str:>20}")
 
     # ------------------------------------------------------------------
-    # Phase 2: Cross-DD best experts
+    # Build cross-DD best ensemble (best expert per profile across all DD types)
     # ------------------------------------------------------------------
     logger.info("=" * 80)
-    logger.info("Phase 2: Cross-DD best experts")
+    logger.info("Building cross-DD best ensemble")
     logger.info("=" * 80)
 
     best_experts = []
@@ -225,9 +194,8 @@ def main():
         if best_config:
             best_experts.append(best_config)
             logger.info(f"Best expert for {profile.name}: "
-                        f"{best_detector_type} (F1={best_f1:.4f})")
+                        f"{best_detector_type} (train F1={best_f1:.4f})")
 
-    phase2_csv = os.path.join(args.output_dir, "phase2_cross_dd_ensemble.csv")
     if len(best_experts) > 0:
         result = evaluate_ensemble(
             generators=generators,
@@ -241,51 +209,22 @@ def main():
         )
         result['detector_type'] = 'mixed'
         result['ensemble_type'] = 'cross_dd_best'
+
+        phase2_csv = os.path.join(args.output_dir, "phase2_cross_dd_ensemble.csv")
         with open(phase2_csv, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=result.keys())
             writer.writeheader()
             writer.writerow(result)
         logger.info(f"Cross-DD best ensemble: macroF1={result['macro_f1']:.4f}")
-        logger.info(f"Phase 2 results saved to {phase2_csv}")
+        logger.info(f"Saved to {phase2_csv}")
 
-    # ------------------------------------------------------------------
-    # Phase 3: Generalist evaluation on eval set
-    # ------------------------------------------------------------------
-    logger.info("=" * 80)
-    logger.info("Phase 3: Generalist evaluation on eval set")
-    logger.info("=" * 80)
+        print(f"\n{'Cross-DD Best':<12} {'N/A':>18} {result['macro_f1']:>20.4f}")
+    else:
+        logger.warning("No experts available for cross-DD ensemble")
 
-    generalist_eval_csv = os.path.join(args.output_dir, "generalists_eval.csv")
-    if os.path.exists(generalist_eval_csv):
-        os.remove(generalist_eval_csv)
-
-    generalist_eval_results = []
-    for detector_type in DETECTOR_TYPES:
-        if detector_type not in all_generalists:
-            continue
-        config = all_generalists[detector_type]
-        result = evaluate_ensemble(
-            generators=generators,
-            drift_frequencies=drift_frequencies,
-            stream_length=args.stream_length,
-            stream_seeds=stream_seeds,
-            tolerances=tolerances,
-            eval_indices=eval_indices,
-            expert_configs=[config],
-            detector_seed=args.seed,
-        )
-        result['detector_type'] = detector_type
-        result['ensemble_type'] = 'generalist'
-        generalist_eval_results.append(result)
-        _append_result_csv(generalist_eval_csv, result,
-                           len(generalist_eval_results) == 1)
-        logger.info(f"Generalist {detector_type}: macroF1={result['macro_f1']:.4f}")
-
-    logger.info(f"Generalist eval results saved to {generalist_eval_csv}")
-
-    logger.info("=" * 80)
-    logger.info("Evaluation complete.")
-    logger.info("=" * 80)
+    print("\n" + "=" * 80)
+    print("Comparison complete.")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

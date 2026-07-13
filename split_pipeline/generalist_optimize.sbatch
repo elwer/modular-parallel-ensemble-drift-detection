@@ -1,5 +1,5 @@
 #!/bin/bash
-# SLURM template for generalist optimization of a single DD type.
+# SLURM template for generalist optimization + eval-on-holdout for a single DD type.
 #
 # Required env vars (set via sbatch --export):
 #   OPTUNA_STORAGE        Optuna storage URL
