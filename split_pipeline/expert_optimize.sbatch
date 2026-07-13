@@ -27,7 +27,7 @@
 set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-/home/eliasw/modular-parallel-ensemble-drift-detection}"
-PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIPELINE_DIR="${SLURM_SUBMIT_DIR:-/home/eliasw/modular-parallel-ensemble-drift-detection}/split_pipeline"
 source setup.sh
 
 export OMP_NUM_THREADS=1
