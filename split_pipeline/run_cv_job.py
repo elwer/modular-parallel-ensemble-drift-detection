@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--expert-trials", type=int, default=100)
     parser.add_argument("--deployment-trials", type=int, default=100)
     parser.add_argument("--per-trial-timeout", type=int, default=1200)
-    parser.add_argument("--n-jobs", type=int, default=7)
+    parser.add_argument("--n-jobs", type=int, default=1)
     args = parser.parse_args()
 
     config = json.loads(Path(args.fold_config).read_text())
@@ -53,7 +53,15 @@ def main():
             "--n-trials", str(args.expert_trials * len(config["profiles"]) + args.deployment_trials),
             "--per-trial-timeout", str(args.per_trial_timeout),
         ]
-    subprocess.run(command, check=True)
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as error:
+        print("Child optimization failed with exit code "
+              f"{error.returncode}:", file=sys.stderr)
+        print("Re-run the command below to expose the original exception:",
+              file=sys.stderr)
+        print(" ".join(command), file=sys.stderr)
+        raise
 
 
 if __name__ == "__main__":

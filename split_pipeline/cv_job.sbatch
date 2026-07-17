@@ -27,5 +27,5 @@ python split_pipeline/run_cv_job.py \
   --expert-trials "${N_TRIALS_EXPERT:-100}" \
   --deployment-trials "${N_TRIALS_DEPLOYMENT:-100}" \
   --per-trial-timeout "${PER_TRIAL_TIMEOUT:-1200}" \
-  --n-jobs "${N_JOBS:-7}" \
+  --n-jobs "${N_JOBS:-1}" \
   2>&1 | tee "${OUTPUT_DIR}/cv_${MODE}_${DETECTOR_TYPE}.log"
