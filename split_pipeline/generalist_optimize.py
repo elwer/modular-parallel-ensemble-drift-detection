@@ -79,8 +79,8 @@ def main():
         raise ValueError("Must specify --generators or --generator")
 
     drift_frequencies = [int(f.strip()) for f in args.drift_frequencies.split(',')]
-    stream_seeds = _resolve_stream_seeds(args.stream_seeds, args.base_stream_seed,
-                                         args.n_streams)
+    stream_seeds = _resolve_stream_seeds(args.stream_seeds, args.n_streams,
+                                         args.base_stream_seed)
     if args.tolerances:
         tolerances = [int(t.strip()) for t in args.tolerances.split(',')]
     else:
