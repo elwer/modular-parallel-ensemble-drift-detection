@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--optuna-storage", required=True)
     parser.add_argument("--stream-length", type=int, default=8000)
+    parser.add_argument("--base-stream-seed", type=int, default=42)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--expert-trials", type=int, default=100)
     parser.add_argument("--deployment-trials", type=int, default=100)
@@ -24,6 +25,7 @@ def main():
     common = [
         "--optuna-storage", args.optuna_storage,
         "--n-streams", str(config["n_streams"]),
+        "--base-stream-seed", str(args.base_stream_seed),
         "--stream-seeds", ",".join(map(str, config["stream_seeds"])),
         "--drift-frequencies", ",".join(map(str, config["drift_frequencies"])),
         "--stream-length", str(args.stream_length),

@@ -22,6 +22,7 @@ python split_pipeline/run_cv_job.py \
   --output-dir "${OUTPUT_DIR}" \
   --optuna-storage "${OPTUNA_STORAGE}" \
   --stream-length "${STREAM_LENGTH:-8000}" \
+  --base-stream-seed "${BASE_STREAM_SEED:-42}" \
   --seed "${SEED:-1337}" \
   --expert-trials "${N_TRIALS_EXPERT:-100}" \
   --deployment-trials "${N_TRIALS_DEPLOYMENT:-100}" \
