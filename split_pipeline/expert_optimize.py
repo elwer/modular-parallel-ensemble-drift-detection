@@ -76,6 +76,8 @@ def main():
                    help="JSON string defining custom profiles")
     ap.add_argument("--n-jobs", type=int, default=7,
                    help="Number of parallel profile optimizations (default: 7 = one per profile)")
+    ap.add_argument("--load-if-exists", action="store_true",
+                   help="Resume existing Optuna studies instead of creating fresh ones")
     args = ap.parse_args()
 
     # Parse generators
@@ -144,7 +146,7 @@ def main():
             'detector_seed': args.seed,
             'n_trials': args.n_trials_expert,
             'per_trial_timeout': args.per_trial_timeout,
-            'load_if_exists': False,
+            'load_if_exists': args.load_if_exists,
         })
 
     experts = {}  # profile_name -> result dict
@@ -260,10 +262,19 @@ def main():
         storage=args.optuna_storage,
         sampler=optuna.samplers.TPESampler(seed=args.seed),
         direction="maximize",
-        load_if_exists=False,
+        load_if_exists=args.load_if_exists,
     )
-    dep_study.optimize(deployment_objective, n_trials=args.n_trials_deployment, n_jobs=1,
-                       show_progress_bar=True)
+    completed_deployment_trials = sum(
+        trial.state == optuna.trial.TrialState.COMPLETE
+        for trial in dep_study.trials
+    )
+    remaining_deployment_trials = max(
+        0, args.n_trials_deployment - completed_deployment_trials)
+    if remaining_deployment_trials:
+        dep_study.optimize(deployment_objective, n_trials=remaining_deployment_trials,
+                           n_jobs=1, show_progress_bar=True)
+    else:
+        logger.info("Deployment study already has the requested number of trials")
 
     best_dep = dep_study.best_trial
     logger.info(f"Phase 2 best deployment params: {best_dep.params}")

@@ -64,6 +64,8 @@ def main():
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--profiles", type=str, default=None,
                    help="JSON string defining custom profiles")
+    ap.add_argument("--load-if-exists", action="store_true",
+                   help="Resume an existing Optuna study instead of creating a fresh one")
     args = ap.parse_args()
 
     # Parse generators
@@ -119,7 +121,7 @@ def main():
         detector_seed=args.seed,
         n_trials=args.n_trials,
         per_trial_timeout=args.per_trial_timeout,
-        load_if_exists=False,
+        load_if_exists=args.load_if_exists,
     )
 
     if 'error' in result:

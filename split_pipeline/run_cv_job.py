@@ -44,6 +44,7 @@ def main():
             "--n-trials-deployment", str(args.deployment_trials),
             "--per-trial-timeout", str(args.per_trial_timeout),
             "--n-jobs", str(args.n_jobs),
+            "--load-if-exists",
         ]
     else:
         script = Path(__file__).with_name("generalist_optimize.py")
@@ -52,6 +53,7 @@ def main():
             "--detector-type", args.detector_type,
             "--n-trials", str(args.expert_trials * len(config["profiles"]) + args.deployment_trials),
             "--per-trial-timeout", str(args.per_trial_timeout),
+            "--load-if-exists",
         ]
     try:
         subprocess.run(command, check=True)
