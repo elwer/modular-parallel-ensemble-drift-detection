@@ -1,22 +1,23 @@
 """
 Compare results across all DD types and build the cross-DD best ensemble.
 
-Loads expert and generalist results from the Optuna DB, then:
+Loads expert and generalist results from the Optuna DB and per-DD CSV files, then:
   1. Prints a comparison table of per-DD ensembles vs generalists
+     (Phase 1b fixed params, Phase 2 optimized params, generalist single+optimized)
   2. Builds the cross-DD best ensemble (best expert per profile across all DD types)
-  3. Evaluates it on the eval set
+  3. Evaluates it on the eval set with fixed and optimized deployment params
   4. Saves everything to CSV
 
 Run this after all expert and generalist jobs have completed.
 
 Usage:
     python split_pipeline/compare_results.py \
-        --optuna-storage sqlite:///expert_ensemble_optuna.db \
+        --optuna-storage sqlite:///split_pipeline/split_pipeline_optuna.db \
         --n-streams 10 --base-stream-seed 42 \
         --drift-frequencies 200,400,500,750,1000,1250,1500,2000,2500,3000 \
         --stream-length 8000 --eval-stream-indices 1,4,8 \
         --generators SineClusters,WaveformDrift2,... \
-        --output-dir expert_ensemble_results
+        --output-dir split_pipeline/results
 """
 
 import os
@@ -148,28 +149,40 @@ def main():
 
         print(f"{detector_type:<12} {expert_str:>16} {gen_str:>20}")
 
-    # Load per-DD ensemble eval results from CSV if available
-    phase1_csv = os.path.join(args.output_dir, "phase1_per_dd_ensembles.csv")
-    gen_eval_csv = os.path.join(args.output_dir, "generalists_eval.csv")
+    # Load per-DD Phase 1b (fixed params) eval results from CSV
+    per_dd_fixed = {}
+    for dd in DETECTOR_TYPES:
+        csv_path = os.path.join(args.output_dir, f"phase1_per_dd_{dd.lower()}.csv")
+        if os.path.exists(csv_path):
+            with open(csv_path) as f:
+                row = csv.DictReader(f).__next__()
+                per_dd_fixed[dd] = float(row['macro_f1'])
 
-    per_dd_eval = {}
-    if os.path.exists(phase1_csv):
-        with open(phase1_csv) as f:
-            for row in csv.DictReader(f):
-                per_dd_eval[row['detector_type']] = float(row['macro_f1'])
+    # Load per-DD Phase 2 (optimized params) eval results from CSV
+    per_dd_opt = {}
+    for dd in DETECTOR_TYPES:
+        csv_path = os.path.join(args.output_dir, f"phase2_per_dd_{dd.lower()}.csv")
+        if os.path.exists(csv_path):
+            with open(csv_path) as f:
+                row = csv.DictReader(f).__next__()
+                per_dd_opt[dd] = float(row['macro_f1'])
 
-    gen_eval = {}
-    if os.path.exists(gen_eval_csv):
-        with open(gen_eval_csv) as f:
-            for row in csv.DictReader(f):
-                gen_eval[row['detector_type']] = float(row['macro_f1'])
+    # Load generalist single-detector eval results from CSV
+    gen_single = {}
+    for dd in DETECTOR_TYPES:
+        csv_path = os.path.join(args.output_dir, f"generalists_eval_{dd.lower()}.csv")
+        if os.path.exists(csv_path):
+            with open(csv_path) as f:
+                row = csv.DictReader(f).__next__()
+                gen_single[dd] = float(row['macro_f1'])
 
-    print(f"\n{'DD Type':<12} {'Per-DD Ens Eval F1':>18} {'Generalist Eval F1':>20}")
-    print("-" * 52)
-    for detector_type in DETECTOR_TYPES:
-        ens_str = f"{per_dd_eval[detector_type]:.4f}" if detector_type in per_dd_eval else "N/A"
-        gen_str = f"{gen_eval[detector_type]:.4f}" if detector_type in gen_eval else "N/A"
-        print(f"{detector_type:<12} {ens_str:>18} {gen_str:>20}")
+    print(f"\n{'DD Type':<12} {'Ens Fixed':>10} {'Ens Opt':>10} {'Gen Single':>12}")
+    print("-" * 46)
+    for dd in DETECTOR_TYPES:
+        ef = f"{per_dd_fixed[dd]:.4f}" if dd in per_dd_fixed else "N/A"
+        eo = f"{per_dd_opt[dd]:.4f}" if dd in per_dd_opt else "N/A"
+        gs = f"{gen_single[dd]:.4f}" if dd in gen_single else "N/A"
+        print(f"{dd:<12} {ef:>10} {eo:>10} {gs:>12}")
 
     # ------------------------------------------------------------------
     # Build cross-DD best ensemble (best expert per profile across all DD types)
@@ -210,7 +223,7 @@ def main():
         result['detector_type'] = 'mixed'
         result['ensemble_type'] = 'cross_dd_best'
 
-        phase2_csv = os.path.join(args.output_dir, "phase2_cross_dd_ensemble.csv")
+        phase2_csv = os.path.join(args.output_dir, "cross_dd_best_ensemble.csv")
         with open(phase2_csv, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=result.keys())
             writer.writeheader()
@@ -218,7 +231,7 @@ def main():
         logger.info(f"Cross-DD best ensemble: macroF1={result['macro_f1']:.4f}")
         logger.info(f"Saved to {phase2_csv}")
 
-        print(f"\n{'Cross-DD Best':<12} {'N/A':>18} {result['macro_f1']:>20.4f}")
+        print(f"\n{'Cross-DD':<12} {result['macro_f1']:>10.4f} {'(fixed)':>10}")
     else:
         logger.warning("No experts available for cross-DD ensemble")
 

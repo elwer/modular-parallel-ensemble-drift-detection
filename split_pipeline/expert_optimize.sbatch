@@ -10,7 +10,8 @@
 #   EVAL_STREAM_INDICES   Comma-separated eval indices
 #   GENERATORS            Comma-separated per-stream list (length 1 or N_STREAMS)
 #   SEED                  Base detector seed
-#   N_TRIALS_EXPERT       Number of trials per expert (default: 50)
+#   N_TRIALS_EXPERT       Number of trials per expert (default: 100)
+#   N_TRIALS_DEPLOYMENT    Phase 2 deployment param trials (default: 100)
 #   PER_TRIAL_TIMEOUT     Per-trial timeout in seconds (default: 1200)
 #   OUTPUT_DIR            Output directory
 #   DETECTOR_TYPE         Detector type (IBDD, OCDD, D3, SPLL, UDetect, CSDDM, BNDM)
@@ -46,6 +47,7 @@ EVAL_STREAM_INDICES="${EVAL_STREAM_INDICES:-1,4,8}"
 GENERATORS="${GENERATORS:-SineClusters}"
 SEED="${SEED:-1337}"
 N_TRIALS_EXPERT="${N_TRIALS_EXPERT:-100}"
+N_TRIALS_DEPLOYMENT="${N_TRIALS_DEPLOYMENT:-100}"
 PER_TRIAL_TIMEOUT="${PER_TRIAL_TIMEOUT:-1200}"
 OUTPUT_DIR="${OUTPUT_DIR:-split_pipeline/results}"
 N_JOBS="${N_JOBS:-7}"
@@ -76,6 +78,7 @@ python "${PIPELINE_DIR}/expert_optimize.py" \
     --eval-stream-indices "${EVAL_STREAM_INDICES}" \
     --seed "${SEED}" \
     --n-trials-expert "${N_TRIALS_EXPERT}" \
+    --n-trials-deployment "${N_TRIALS_DEPLOYMENT}" \
     --per-trial-timeout "${PER_TRIAL_TIMEOUT}" \
     --output-dir "${OUTPUT_DIR}" \
     --n-jobs "${N_JOBS}" \

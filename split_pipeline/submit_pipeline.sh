@@ -25,25 +25,27 @@ EVAL_STREAM_INDICES="1,4,8"
 GENERATORS="SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2"
 SEED=1337
 N_TRIALS_EXPERT=100
+N_TRIALS_DEPLOYMENT=100
 PER_TRIAL_TIMEOUT=1200
 OUTPUT_DIR="split_pipeline/results"
 N_JOBS_EXPERT=7
 
-# Generalist: K profiles * N_TRIALS_EXPERT = 7 * 100 = 700
+# Generalist: 7 * 100 detector trials + 100 deployment-equivalent trials = 800
 N_PROFILES=7
-N_TRIALS_GENERALIST=$((N_PROFILES * N_TRIALS_EXPERT))
+N_TRIALS_GENERALIST=$((N_PROFILES * N_TRIALS_EXPERT + N_TRIALS_DEPLOYMENT))
 
 DETECTOR_TYPES=("BNDM" "CSDDM" "D3" "IBDD" "OCDD" "SPLL" "UDetect")
 
 # Export shared env vars
 export OPTUNA_STORAGE N_STREAMS BASE_STREAM_SEED DRIFT_FREQUENCIES STREAM_LENGTH
-export EVAL_STREAM_INDICES GENERATORS SEED N_TRIALS_EXPERT PER_TRIAL_TIMEOUT
+export EVAL_STREAM_INDICES GENERATORS SEED N_TRIALS_EXPERT N_TRIALS_DEPLOYMENT PER_TRIAL_TIMEOUT
 export OUTPUT_DIR
 
 echo "=== Split Pipeline Submission ==="
 echo "  Storage:       ${OPTUNA_STORAGE}"
 echo "  Output dir:    ${OUTPUT_DIR}"
 echo "  Expert trials: ${N_TRIALS_EXPERT} per profile x detector"
+echo "  Deployment trials: ${N_TRIALS_DEPLOYMENT} per DD type (Phase 2)"
 echo "  Generalist trials: ${N_TRIALS_GENERALIST} per DD type"
 echo ""
 

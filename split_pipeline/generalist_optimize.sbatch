@@ -11,7 +11,7 @@
 #   EVAL_STREAM_INDICES   Comma-separated eval indices
 #   GENERATORS            Comma-separated per-stream list
 #   SEED                  Base detector seed
-#   N_TRIALS              Number of Optuna trials (default: 350 = 7 profiles * 50)
+#   N_TRIALS              Number of Optuna trials (default: 800 total budget)
 #   PER_TRIAL_TIMEOUT     Per-trial timeout in seconds
 #   OUTPUT_DIR            Output directory
 
@@ -44,7 +44,7 @@ STREAM_LENGTH="${STREAM_LENGTH:-8000}"
 EVAL_STREAM_INDICES="${EVAL_STREAM_INDICES:-1,4,8}"
 GENERATORS="${GENERATORS:-SineClusters}"
 SEED="${SEED:-1337}"
-N_TRIALS="${N_TRIALS:-700}"
+N_TRIALS="${N_TRIALS:-800}"
 PER_TRIAL_TIMEOUT="${PER_TRIAL_TIMEOUT:-1200}"
 OUTPUT_DIR="${OUTPUT_DIR:-split_pipeline/results}"
 

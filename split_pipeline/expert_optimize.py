@@ -1,20 +1,24 @@
 """
 Expert optimization + per-DD ensemble evaluation for a single detector type.
 
-Optimizes K profile-experts for one DD type (7 studies × 50 trials each),
-then evaluates the per-DD ensemble (all K experts together) on the eval set.
+Phase 1: Optimize K profile-experts for one DD type (7 studies × 100 trials each).
+Phase 1b: Evaluate per-DD ensemble with fixed conservative deployment params.
+Phase 2: Optuna optimization of ensemble deployment params (100 trials):
+         detector_decision_criteria, ensemble_decision_criteria,
+         decision_window, suppression_window, recent_samples_size.
 Designed to be submitted as one SLURM job per detector type (7 jobs total).
 
 Usage:
     python split_pipeline/expert_optimize.py \
-        --optuna-storage sqlite:///expert_ensemble_optuna.db \
+        --optuna-storage sqlite:///split_pipeline/split_pipeline_optuna.db \
         --detector-type BNDM \
         --n-streams 10 --base-stream-seed 42 \
         --drift-frequencies 200,400,500,750,1000,1250,1500,2000,2500,3000 \
         --stream-length 8000 --eval-stream-indices 1,4,8 \
         --generators SineClusters,WaveformDrift2,... \
-        --n-trials-expert 50 --per-trial-timeout 1200 \
-        --n-jobs 7 --output-dir expert_ensemble_results
+        --n-trials-expert 100 --n-trials-deployment 100 \
+        --per-trial-timeout 1200 \
+        --n-jobs 7 --output-dir split_pipeline/results
 """
 
 import os
@@ -22,6 +26,7 @@ import sys
 import csv
 import json
 import logging
+import optuna
 from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -38,6 +43,8 @@ from optimization.expert_ensemble_optuna import (
     get_profile_indices,
     optimize_single_detector_expert,
     evaluate_ensemble,
+    _run_mopedds_stream,
+    _f1_from_counts,
     _append_result_csv,
 )
 
@@ -60,7 +67,9 @@ def main():
     ap.add_argument("--generators", type=str, default=None)
     ap.add_argument("--generator", type=str, default=None)
     ap.add_argument("--seed", type=int, default=1337)
-    ap.add_argument("--n-trials-expert", type=int, default=50)
+    ap.add_argument("--n-trials-expert", type=int, default=100)
+    ap.add_argument("--n-trials-deployment", type=int, default=100,
+                   help="Phase 2: trials for ensemble deployment param optimization")
     ap.add_argument("--per-trial-timeout", type=int, default=1200)
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--profiles", type=str, default=None,
@@ -117,7 +126,7 @@ def main():
         logger.info(f"  Profile {profile_name}: {len(indices)} streams (indices: {indices})")
 
     os.makedirs(args.output_dir, exist_ok=True)
-    expert_csv = os.path.join(args.output_dir, "experts.csv")
+    expert_csv = os.path.join(args.output_dir, f"experts_{args.detector_type.lower()}.csv")
 
     # Build expert tasks: all profiles for this single DD type
     expert_tasks = []
@@ -172,16 +181,20 @@ def main():
     logger.info(f"Expert results saved to {expert_csv}")
 
     # ------------------------------------------------------------------
-    # Evaluate per-DD ensemble (all K experts together) on eval set
+    # Phase 1b: Evaluate per-DD ensemble with fixed conservative params
     # ------------------------------------------------------------------
     logger.info("=" * 80)
-    logger.info(f"Evaluating per-DD ensemble for {args.detector_type}")
+    logger.info(f"Phase 1b: Per-DD ensemble eval (fixed params) for {args.detector_type}")
     logger.info("=" * 80)
 
-    expert_configs = list(experts.values())
+    expert_configs = [experts[name] for name in sorted(experts)]
     if len(expert_configs) == 0:
         logger.warning("No experts available, skipping ensemble evaluation")
         return
+
+    slot_specs = []
+    for config in expert_configs:
+        slot_specs.append((config['detector_type'], config['best_params']))
 
     ens_result = evaluate_ensemble(
         generators=generators,
@@ -194,15 +207,113 @@ def main():
         detector_seed=args.seed,
     )
     ens_result['detector_type'] = args.detector_type
-    ens_result['ensemble_type'] = 'per_dd'
+    ens_result['ensemble_type'] = 'per_dd_fixed'
 
-    phase1_csv = os.path.join(args.output_dir, "phase1_per_dd_ensembles.csv")
-    is_first = not os.path.exists(phase1_csv)
-    _append_result_csv(phase1_csv, ens_result, is_first)
-    logger.info(f"Per-DD ensemble {args.detector_type}: "
+    phase1_csv = os.path.join(args.output_dir, f"phase1_per_dd_{args.detector_type.lower()}.csv")
+    _append_result_csv(phase1_csv, ens_result, True)
+    logger.info(f"Phase 1b ensemble {args.detector_type}: "
                 f"macroF1={ens_result['macro_f1']:.4f} (saved to {phase1_csv})")
 
-    logger.info("Expert optimization + evaluation complete.")
+    # ------------------------------------------------------------------
+    # Phase 2: Optuna optimization of ensemble deployment params
+    # ------------------------------------------------------------------
+    logger.info("=" * 80)
+    logger.info(f"Phase 2: Optimizing deployment params for {args.detector_type} ensemble")
+    logger.info("=" * 80)
+
+    train_indices = [i for i in range(args.n_streams) if i not in eval_set]
+
+    def deployment_objective(trial):
+        det_criteria = trial.suggest_categorical("detector_decision_criteria",
+                                                  ["any", "all", "majority"])
+        ens_criteria = trial.suggest_categorical("ensemble_decision_criteria",
+                                                  ["any", "all", "majority"])
+        decision_window = trial.suggest_int("decision_window", 1, 50)
+        suppression_window = trial.suggest_int("suppression_window", 0, 100)
+        recent_samples_size = trial.suggest_int("recent_samples_size", 50, 500)
+
+        tp_total, fp_total, fn_total = 0, 0, 0
+        for s_idx in train_indices:
+            tp, fp, fn, _, _, _, _, _ = _run_mopedds_stream(
+                generator_name=generators[s_idx],
+                drift_frequency=drift_frequencies[s_idx],
+                stream_length=args.stream_length,
+                stream_seed=stream_seeds[s_idx],
+                tolerance=tolerances[s_idx],
+                slot_specs=slot_specs,
+                detector_seed_base=args.seed,
+                s_idx=s_idx,
+                detector_decision_criteria=det_criteria,
+                ensemble_decision_criteria=ens_criteria,
+                decision_window=decision_window,
+                suppression_window=suppression_window,
+                recent_samples_size=recent_samples_size,
+            )
+            tp_total += tp
+            fp_total += fp
+            fn_total += fn
+        return _f1_from_counts(tp_total, fp_total, fn_total)
+
+    study_name = f"deploy_expert_{args.detector_type.lower()}"
+    dep_study = optuna.create_study(
+        study_name=study_name,
+        storage=args.optuna_storage,
+        sampler=optuna.samplers.TPESampler(seed=args.seed),
+        direction="maximize",
+        load_if_exists=False,
+    )
+    dep_study.optimize(deployment_objective, n_trials=args.n_trials_deployment, n_jobs=1,
+                       show_progress_bar=True)
+
+    best_dep = dep_study.best_trial
+    logger.info(f"Phase 2 best deployment params: {best_dep.params}")
+    logger.info(f"Phase 2 best train F1: {best_dep.value:.4f}")
+
+    # Evaluate best deployment params on eval set
+    tp_total, fp_total, fn_total = 0, 0, 0
+    per_stream_f1 = []
+    for s_idx in eval_indices:
+        tp, fp, fn, _, f1, _, _, _ = _run_mopedds_stream(
+            generator_name=generators[s_idx],
+            drift_frequency=drift_frequencies[s_idx],
+            stream_length=args.stream_length,
+            stream_seed=stream_seeds[s_idx],
+            tolerance=tolerances[s_idx],
+            slot_specs=slot_specs,
+            detector_seed_base=args.seed,
+            s_idx=s_idx,
+            detector_decision_criteria=best_dep.params["detector_decision_criteria"],
+            ensemble_decision_criteria=best_dep.params["ensemble_decision_criteria"],
+            decision_window=best_dep.params["decision_window"],
+            suppression_window=best_dep.params["suppression_window"],
+            recent_samples_size=best_dep.params["recent_samples_size"],
+        )
+        tp_total += tp
+        fp_total += fp
+        fn_total += fn
+        per_stream_f1.append(f1)
+
+    macro_f1 = sum(per_stream_f1) / len(per_stream_f1) if per_stream_f1 else 0.0
+    micro_f1 = _f1_from_counts(tp_total, fp_total, fn_total)
+
+    phase2_result = {
+        'detector_type': args.detector_type,
+        'ensemble_type': 'per_dd_optimized',
+        'train_f1': best_dep.value,
+        'macro_f1': macro_f1,
+        'micro_f1': micro_f1,
+        'tp_total': tp_total,
+        'fp_total': fp_total,
+        'fn_total': fn_total,
+        'per_stream_f1': per_stream_f1,
+        'best_deployment_params': json.dumps(best_dep.params),
+    }
+    phase2_csv = os.path.join(args.output_dir, f"phase2_per_dd_{args.detector_type.lower()}.csv")
+    _append_result_csv(phase2_csv, phase2_result, True)
+    logger.info(f"Phase 2 ensemble {args.detector_type}: "
+                f"macroF1={macro_f1:.4f} (saved to {phase2_csv})")
+
+    logger.info("Expert optimization + deployment optimization complete.")
 
 
 if __name__ == "__main__":
