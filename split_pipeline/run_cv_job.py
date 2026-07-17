@@ -21,6 +21,11 @@ def main():
     parser.add_argument("--n-jobs", type=int, default=1)
     args = parser.parse_args()
 
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    if args.optuna_storage.startswith("sqlite:///"):
+        database_path = Path(args.optuna_storage[len("sqlite:///"):])
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+
     config = json.loads(Path(args.fold_config).read_text())
     common = [
         "--optuna-storage", args.optuna_storage,
