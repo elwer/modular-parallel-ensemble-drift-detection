@@ -56,7 +56,7 @@ import warnings
 import datetime
 import multiprocessing as mp
 from argparse import ArgumentParser
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import optuna
 from optuna.samplers import TPESampler
@@ -119,18 +119,46 @@ def build_stream(generator_name: str, drift_frequency: int,
                seed=seed)
 
 
-def _suggest_detector_params(trial: optuna.Trial, prefix: str, kind: str) -> dict:
+# Fraction of the smallest inter-drift gap that a detector's recent/comparison
+# window (n_samples for window-based detectors, n_reference_samples for D3) is
+# allowed to span. Keeping the window below the drift interval lets the recent
+# window fill with post-drift samples between consecutive drifts, so drifts on
+# the densest streams can actually be localized (otherwise recall collapses
+# regardless of the TP-matching tolerance).
+MAX_WINDOW_FRACTION = 0.5
+
+
+def _max_window(drift_frequencies: List[int], indices: List[int]) -> Optional[int]:
+    """Upper bound on the primary detector window, derived from the smallest
+    drift frequency across the streams being optimized. Returns ``None`` when
+    no indices are given (disables capping)."""
+    freqs = [drift_frequencies[i] for i in indices]
+    if not freqs:
+        return None
+    return max(1, int(min(freqs) * MAX_WINDOW_FRACTION))
+
+
+def _cap(low: int, high: int, max_window: Optional[int]) -> int:
+    """Clamp an upper bound to ``max_window`` while never dropping below the
+    parameter's natural lower bound (so ``suggest_int(low, high)`` stays valid)."""
+    if max_window is None:
+        return high
+    return max(low, min(high, max_window))
+
+
+def _suggest_detector_params(trial: optuna.Trial, prefix: str, kind: str,
+                             max_window: Optional[int] = None) -> dict:
     p = prefix
     if kind == "BNDM":
         return {
-            "n_samples": trial.suggest_int(f"{p}n_samples", 50, 500),
+            "n_samples": trial.suggest_int(f"{p}n_samples", 50, _cap(50, 500, max_window)),
             "const": trial.suggest_float(f"{p}const", 0.1, 10.0),
             "threshold": trial.suggest_float(f"{p}threshold", 0.1, 0.9),
             "max_depth": trial.suggest_int(f"{p}max_depth", 1, 10),
         }
     if kind == "CSDDM":
         return {
-            "n_samples": trial.suggest_int(f"{p}n_samples", 50, 500),
+            "n_samples": trial.suggest_int(f"{p}n_samples", 50, _cap(50, 500, max_window)),
             "feature_proportion": trial.suggest_float(f"{p}feature_proportion", 0.1, 1.0),
             "n_clusters": trial.suggest_int(f"{p}n_clusters", 2, 30),
             "confidence": trial.suggest_categorical(
@@ -138,32 +166,45 @@ def _suggest_detector_params(trial: optuna.Trial, prefix: str, kind: str) -> dic
         }
     if kind == "D3":
         return {
-            "n_reference_samples": trial.suggest_int(f"{p}n_reference_samples", 50, 5000),
+            "n_reference_samples": trial.suggest_int(f"{p}n_reference_samples", 50, _cap(50, 5000, max_window)),
             "recent_samples_proportion": trial.suggest_float(f"{p}recent_samples_proportion", 0.05, 0.5),
             "threshold": trial.suggest_float(f"{p}threshold", 0.1, 0.9),
         }
     if kind == "IBDD":
+        # constraint_IBDD (validated benchmark): the "consecutive deviations"
+        # test slices the last n_consecutive_deviations+1 entries out of a
+        # deque capped at update_interval, and the initial thresholds are built
+        # from n_permutations deviations. Sample the dependent bounds so that
+        #   update_interval >= n_consecutive_deviations + 1
+        #   n_permutations   >= n_consecutive_deviations
+        # always hold, otherwise IBDD degenerates and can never fire correctly.
+        n_consecutive_deviations = trial.suggest_int(
+            f"{p}n_consecutive_deviations", 1, 20)
+        update_interval = trial.suggest_int(
+            f"{p}update_interval", max(10, n_consecutive_deviations + 1), 100)
+        n_permutations = trial.suggest_int(
+            f"{p}n_permutations", max(100, n_consecutive_deviations), 1000)
         return {
-            "n_samples": trial.suggest_int(f"{p}n_samples", 100, 2000),
-            "n_consecutive_deviations": trial.suggest_int(f"{p}n_consecutive_deviations", 1, 20),
-            "n_permutations": trial.suggest_int(f"{p}n_permutations", 100, 1000),
-            "update_interval": trial.suggest_int(f"{p}update_interval", 10, 100),
+            "n_samples": trial.suggest_int(f"{p}n_samples", 100, _cap(100, 2000, max_window)),
+            "n_consecutive_deviations": n_consecutive_deviations,
+            "n_permutations": n_permutations,
+            "update_interval": update_interval,
         }
     if kind == "OCDD":
         return {
-            "n_samples": trial.suggest_int(f"{p}n_samples", 50, 500),
+            "n_samples": trial.suggest_int(f"{p}n_samples", 50, _cap(50, 500, max_window)),
             "threshold": trial.suggest_float(f"{p}threshold", 0.1, 0.9),
         }
     if kind == "SPLL":
         return {
-            "n_samples": trial.suggest_int(f"{p}n_samples", 100, 1000),
+            "n_samples": trial.suggest_int(f"{p}n_samples", 100, _cap(100, 1000, max_window)),
             "n_clusters": trial.suggest_int(f"{p}n_clusters", 2, 20),
             "threshold": trial.suggest_float(f"{p}threshold", 0.1, 5.0),
         }
     if kind == "UDetect":
         return {
             "n_windows": trial.suggest_int(f"{p}n_windows", 5, 30),
-            "n_samples": trial.suggest_int(f"{p}n_samples", 20, 200),
+            "n_samples": trial.suggest_int(f"{p}n_samples", 20, _cap(20, 200, max_window)),
             "disjoint_training_windows": trial.suggest_categorical(
                 f"{p}disjoint_training_windows", [True, False]),
         }
@@ -272,6 +313,7 @@ def make_objective(*, generators: List[str],
         train_known_counts.append(len(list(probe.drifts)))
 
     pinned_globals = dict(pinned_globals or {})
+    train_max_window = _max_window(drift_frequencies, train_indices)
     train_tolerances = [tolerances[i] for i in train_indices]
     suppression_max = max(0, min(train_tolerances)) if train_tolerances else 0
     # Clip pinned suppression_window if it exceeds the allowed range. This
@@ -324,7 +366,8 @@ def make_objective(*, generators: List[str],
         slot_specs = []
         for i in range(size):
             kind = trial.suggest_categorical(f"slot{i}_type", CANDIDATES)
-            params = _suggest_detector_params(trial, f"slot{i}_{kind}_", kind)
+            params = _suggest_detector_params(trial, f"slot{i}_{kind}_", kind,
+                                               max_window=train_max_window)
             slot_specs.append((kind, params))
 
         signal.signal(signal.SIGALRM, _timeout_handler)
@@ -627,10 +670,10 @@ def _resolve_study_tag(arg_tag: str, generators: List[str]) -> str:
 
 
 def _default_tolerances(drift_frequencies: List[int]) -> List[int]:
-    """Default per-stream TP-matching tolerance: ~2% of the inter-drift gap,
+    """Default per-stream TP-matching tolerance: ~10% of the inter-drift gap,
     with a floor of 1 sample. Keeps the matching window proportional across
     streams so train and eval F1 are directly comparable."""
-    return [max(1, df // 50) for df in drift_frequencies]
+    return [max(1, df // 10) for df in drift_frequencies]
 
 
 # ---------------------------------------------------------------------------

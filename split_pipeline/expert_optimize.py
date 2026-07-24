@@ -234,9 +234,9 @@ def main():
         suppression_window = trial.suggest_int("suppression_window", 0, 100)
         recent_samples_size = trial.suggest_int("recent_samples_size", 50, 500)
 
-        tp_total, fp_total, fn_total = 0, 0, 0
+        per_stream_f1 = []
         for s_idx in train_indices:
-            tp, fp, fn, _, _, _, _, _ = _run_mopedds_stream(
+            tp, fp, fn, _, f1, _, _, _ = _run_mopedds_stream(
                 generator_name=generators[s_idx],
                 drift_frequency=drift_frequencies[s_idx],
                 stream_length=args.stream_length,
@@ -251,10 +251,8 @@ def main():
                 suppression_window=suppression_window,
                 recent_samples_size=recent_samples_size,
             )
-            tp_total += tp
-            fp_total += fp
-            fn_total += fn
-        return _f1_from_counts(tp_total, fp_total, fn_total)
+            per_stream_f1.append(f1)
+        return sum(per_stream_f1) / len(per_stream_f1) if per_stream_f1 else 0.0
 
     study_name = f"deploy_expert_{args.detector_type.lower()}"
     dep_study = optuna.create_study(

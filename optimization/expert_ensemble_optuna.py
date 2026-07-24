@@ -37,6 +37,7 @@ from optimization.synthetic_f1_multistream_optimize_optuna import (
     _default_tolerances,
     GENERATORS,
     _suggest_detector_params,
+    _max_window,
     _instantiate,
     _f1_from_counts,
     _run_one_stream,
@@ -126,6 +127,7 @@ def optimize_single_detector_expert(*,
     """Optimize a single detector expert for a specific profile."""
     logger.info(f"Optimizing {detector_type} expert for profile {profile_name}")
     logger.info(f"  Profile indices: {profile_indices}")
+    slot_max_window = _max_window(drift_frequencies, profile_indices)
     logger.info(f"  Trials: {n_trials}, Timeout: {per_trial_timeout}s")
     
     if len(profile_indices) == 0:
@@ -147,7 +149,8 @@ def optimize_single_detector_expert(*,
     
     def objective(trial: optuna.Trial) -> float:
         # Sample detector hyperparameters
-        params = _suggest_detector_params(trial, "", detector_type)
+        params = _suggest_detector_params(trial, "", detector_type,
+                                          max_window=slot_max_window)
         
         # Fixed conservative MoPEDDS parameters (not optimized)
         detector_decision_criteria = "any"
@@ -248,6 +251,7 @@ def optimize_generalist_detector(*,
     """Optimize a generalist detector on all streams."""
     logger.info(f"Optimizing generalist {detector_type}")
     logger.info(f"  Train indices: {train_indices}")
+    slot_max_window = _max_window(drift_frequencies, train_indices)
     logger.info(f"  Trials: {n_trials}, Timeout: {per_trial_timeout}s")
     
     # Create or resume Optuna study (deterministic name for resumability)
@@ -265,7 +269,8 @@ def optimize_generalist_detector(*,
     
     def objective(trial: optuna.Trial) -> float:
         # Sample detector hyperparameters
-        params = _suggest_detector_params(trial, "", detector_type)
+        params = _suggest_detector_params(trial, "", detector_type,
+                                          max_window=slot_max_window)
         
         # Fixed conservative MoPEDDS parameters (not optimized)
         detector_decision_criteria = "any"

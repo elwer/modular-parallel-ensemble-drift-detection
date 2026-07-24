@@ -104,16 +104,16 @@ def _run_one_stream(generator_name: str, drift_frequency: int, stream_length: in
     # Compute metrics
     tp, fp, fn, mean_delay = 0, 0, 0, 0.0
     if len(known) > 0 and len(detections) > 0:
-        # Match detections to known drifts
+        # Match detections to known drifts (one-sided: kd <= d <= kd + tolerance)
         matched = [False] * len(known)
         for det in detections:
             matched_this = False
             for i, loc in enumerate(known):
-                if not matched[i] and abs(det - loc) <= tolerance:
+                if not matched[i] and loc <= det <= loc + tolerance:
                     tp += 1
                     matched[i] = True
                     matched_this = True
-                    mean_delay += abs(det - loc)
+                    mean_delay += det - loc
                     break
             if not matched_this:
                 fp += 1
@@ -136,7 +136,8 @@ def evaluate_detector(generators: List[str], drift_frequencies: List[int],
     """Evaluate single detector on given stream indices."""
     tp_total, fp_total, fn_total, delay_total = 0, 0, 0, 0.0
     known_total = 0
-    
+    per_stream_f1 = []
+
     for s_idx in indices:
         result = _run_one_stream(
             generator_name=generators[s_idx],
@@ -155,16 +156,20 @@ def evaluate_detector(generators: List[str], drift_frequencies: List[int],
         fn_total += fn
         delay_total += mean_delay * tp
         known_total += known
-    
-    macro_f1 = _f1_from_counts(tp_total, fp_total, fn_total)
+        per_stream_f1.append(f1)
+
+    macro_f1 = sum(per_stream_f1) / len(per_stream_f1) if per_stream_f1 else 0.0
+    micro_f1 = _f1_from_counts(tp_total, fp_total, fn_total)
     mean_delay = delay_total / tp_total if tp_total > 0 else 0.0
-    
+
     return {
         'macro_f1': macro_f1,
+        'micro_f1': micro_f1,
         'mean_delay': mean_delay,
         'tp': tp_total,
         'fp': fp_total,
         'fn': fn_total,
+        'per_stream_f1': per_stream_f1,
     }
 
 
