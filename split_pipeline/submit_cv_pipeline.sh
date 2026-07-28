@@ -17,11 +17,18 @@ SEED="${SEED:-1337}"
 OPTUNA_STORAGE_ROOT="${OPTUNA_STORAGE_ROOT:-${ROOT_DIR}/split_pipeline/cv_optuna}"
 mkdir -p "${CONFIG_DIR}" "${RESULT_DIR}" "${OPTUNA_STORAGE_ROOT}"
 
+PATTERNS_ARG=()
+if [[ -n "${PATTERNS:-}" ]]; then
+    PATTERNS_ARG=(--patterns "${PATTERNS}")
+fi
+
 python "${ROOT_DIR}/split_pipeline/generate_cv_configs.py" \
-  --output-dir "${CONFIG_DIR}" --repeats "${N_REPEATS}" --base-seed "${BASE_SEED}"
+  --output-dir "${CONFIG_DIR}" --repeats "${N_REPEATS}" --base-seed "${BASE_SEED}" \
+  "${PATTERNS_ARG[@]}"
 
 DETECTORS=(BNDM CSDDM D3 IBDD OCDD SPLL UDetect)
-for fold in $(seq 0 $((N_REPEATS * 5 - 1))); do
+N_FOLDS=$(ls -1 "${CONFIG_DIR}"/fold_*.json 2>/dev/null | wc -l)
+for fold in $(seq 0 $((N_FOLDS - 1))); do
   CONFIG="${CONFIG_DIR}/fold_${fold}.json"
   for detector in "${DETECTORS[@]}"; do
     for mode in expert generalist; do
@@ -36,5 +43,6 @@ for fold in $(seq 0 $((N_REPEATS * 5 - 1))); do
   done
 done
 
-echo "Submitted 210 independent CV jobs (15 folds x 7 DD types x 2 methods)."
+TOTAL_JOBS=$((N_FOLDS * 7 * 2))
+echo "Submitted ${TOTAL_JOBS} independent CV jobs (${N_FOLDS} folds x 7 DD types x 2 methods)."
 echo "Aggregate after completion with aggregate_cv_results.py."

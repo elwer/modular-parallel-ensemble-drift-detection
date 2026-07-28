@@ -17,14 +17,22 @@ PATTERNS = [
 ]
 
 
-def build_configs(output_dir, repeats, base_seed):
+def parse_patterns(patterns_str):
+    pairs = []
+    for item in patterns_str.split(","):
+        gen, freq = item.strip().split(":")
+        pairs.append((gen.strip(), int(freq.strip())))
+    return pairs
+
+
+def build_configs(output_dir, repeats, base_seed, patterns):
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     generators = []
     frequencies = []
     seeds = []
     for repeat in range(repeats):
-        for index, (generator, frequency) in enumerate(PATTERNS):
+        for index, (generator, frequency) in enumerate(patterns):
             generators.append(generator)
             frequencies.append(frequency)
             seeds.append(base_seed + repeat * 10000 + index)
@@ -36,13 +44,15 @@ def build_configs(output_dir, repeats, base_seed):
             "drift_freq_min": frequency,
             "drift_freq_max": frequency,
         }
-        for generator, frequency in PATTERNS
+        for generator, frequency in patterns
     ]
-    pattern_folds = [(2 * i, 2 * i + 1) for i in range(5)]
+    n_patterns = len(patterns)
+    n_folds = n_patterns // 2
+    pattern_folds = [(2 * i, 2 * i + 1) for i in range(n_folds)]
     fold = 0
     for eval_repeat in range(repeats):
         for held_out_patterns in pattern_folds:
-            offset = eval_repeat * len(PATTERNS)
+            offset = eval_repeat * n_patterns
             eval_indices = [offset + index for index in held_out_patterns]
             eval_set = set(eval_indices)
             train_indices = [i for i in range(len(generators)) if i not in eval_set]
@@ -65,10 +75,16 @@ def main():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--base-seed", type=int, default=42)
+    parser.add_argument("--patterns", type=str, default=None,
+                        help="Comma-separated list of generator:frequency pairs, "
+                             "e.g. 'SineClusters:200,WaveformDrift2:750'")
     args = parser.parse_args()
     if args.repeats < 1:
         raise ValueError("--repeats must be positive")
-    build_configs(args.output_dir, args.repeats, args.base_seed)
+    patterns = parse_patterns(args.patterns) if args.patterns else PATTERNS
+    if len(patterns) < 2 or len(patterns) % 2 != 0:
+        raise ValueError("Patterns must have an even number of entries (>= 2) for CV folds")
+    build_configs(args.output_dir, args.repeats, args.base_seed, patterns)
 
 
 if __name__ == "__main__":
