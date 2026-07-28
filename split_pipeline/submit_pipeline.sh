@@ -49,6 +49,15 @@ echo "  Deployment trials: ${N_TRIALS_DEPLOYMENT} per DD type (Phase 2)"
 echo "  Generalist trials: ${N_TRIALS_GENERALIST} per DD type"
 echo ""
 
+# Initialize the Optuna DB schema before submitting any jobs.
+# This prevents "table studies already exists" errors when 14 jobs
+# start simultaneously and all try to create the SQLite schema.
+python -c "
+import optuna
+optuna.storages.RDBStorage('${OPTUNA_STORAGE}')
+print('Optuna DB schema initialized.')
+"
+
 # Submit expert optimization+eval jobs (one per DD type)
 export N_JOBS="${N_JOBS_EXPERT}"
 EXPERT_JOB_IDS=()

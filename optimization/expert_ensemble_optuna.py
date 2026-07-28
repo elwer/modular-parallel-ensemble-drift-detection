@@ -18,6 +18,7 @@ import csv
 import logging
 import json
 import signal
+import time
 from argparse import ArgumentParser
 from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict
@@ -25,6 +26,27 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import optuna
 from optuna.samplers import TPESampler
+
+
+def _create_study_with_retry(*, study_name, storage, direction="maximize",
+                             load_if_exists=True, sampler=None, max_retries=5):
+    """Create an Optuna study with retry logic for SQLite concurrency errors."""
+    for attempt in range(max_retries):
+        try:
+            kwargs = dict(study_name=study_name, storage=storage,
+                          direction=direction, load_if_exists=load_if_exists)
+            if sampler is not None:
+                kwargs["sampler"] = sampler
+            return optuna.create_study(**kwargs)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                logging.getLogger(__name__).warning(
+                    f"create_study failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -136,7 +158,7 @@ def optimize_single_detector_expert(*,
     
     # Create or resume Optuna study (deterministic name for resumability)
     study_name = f"expert_{profile_name}_{detector_type.lower()}"
-    study = optuna.create_study(
+    study = _create_study_with_retry(
         study_name=study_name,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),
@@ -256,7 +278,7 @@ def optimize_generalist_detector(*,
     
     # Create or resume Optuna study (deterministic name for resumability)
     study_name = f"generalist_{detector_type.lower()}"
-    study = optuna.create_study(
+    study = _create_study_with_retry(
         study_name=study_name,
         storage=optuna_storage,
         sampler=TPESampler(seed=detector_seed),

@@ -46,6 +46,7 @@ from optimization.expert_ensemble_optuna import (
     _run_mopedds_stream,
     _f1_from_counts,
     _append_result_csv,
+    _create_study_with_retry,
 )
 
 logging.basicConfig(level=logging.INFO,
@@ -152,6 +153,17 @@ def main():
     experts = {}  # profile_name -> result dict
     logger.info(f"Total expert tasks: {len(expert_tasks)} (profiles for {args.detector_type})")
 
+    # Pre-create all Optuna studies sequentially in the parent process to avoid
+    # SQLite concurrency errors when multiple workers call create_study simultaneously.
+    for task in expert_tasks:
+        study_name = f"expert_{task['profile_name']}_{task['detector_type'].lower()}"
+        _create_study_with_retry(
+            study_name=study_name,
+            storage=task['optuna_storage'],
+            direction="maximize",
+            load_if_exists=True,
+        )
+
     if args.n_jobs > 1:
         with ProcessPoolExecutor(max_workers=args.n_jobs) as pool:
             futures = {
@@ -255,7 +267,7 @@ def main():
         return sum(per_stream_f1) / len(per_stream_f1) if per_stream_f1 else 0.0
 
     study_name = f"deploy_expert_{args.detector_type.lower()}"
-    dep_study = optuna.create_study(
+    dep_study = _create_study_with_retry(
         study_name=study_name,
         storage=args.optuna_storage,
         sampler=optuna.samplers.TPESampler(seed=args.seed),
