@@ -85,5 +85,6 @@ python "${PIPELINE_DIR}/expert_optimize.py" \
     --per-trial-timeout "${PER_TRIAL_TIMEOUT}" \
     --output-dir "${OUTPUT_DIR}" \
     --n-jobs "${N_JOBS}" \
+    --load-if-exists \
     "${EXTRA_ARGS[@]}" \
     2>&1 | tee "${LOG}"

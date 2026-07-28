@@ -79,5 +79,6 @@ python "${PIPELINE_DIR}/generalist_optimize.py" \
     --n-trials "${N_TRIALS}" \
     --per-trial-timeout "${PER_TRIAL_TIMEOUT}" \
     --output-dir "${OUTPUT_DIR}" \
+    --load-if-exists \
     "${EXTRA_ARGS[@]}" \
     2>&1 | tee "${LOG}"
