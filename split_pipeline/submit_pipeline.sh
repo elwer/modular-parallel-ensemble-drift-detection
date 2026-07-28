@@ -15,23 +15,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Configuration
-OPTUNA_STORAGE="sqlite:///split_pipeline/split_pipeline_optuna.db"
-N_STREAMS=10
-BASE_STREAM_SEED=42
-DRIFT_FREQUENCIES="200,400,500,750,1000,1250,1500,2000,2500,3000"
-STREAM_LENGTH=8000
-EVAL_STREAM_INDICES="1,4,8"
-GENERATORS="SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2"
-SEED=1337
-N_TRIALS_EXPERT=100
-N_TRIALS_DEPLOYMENT=100
-PER_TRIAL_TIMEOUT=1200
-OUTPUT_DIR="split_pipeline/results"
-N_JOBS_EXPERT=7
+# Configuration (all overridable via env vars)
+OPTUNA_STORAGE="${OPTUNA_STORAGE:-sqlite:///split_pipeline/split_pipeline_optuna.db}"
+N_STREAMS="${N_STREAMS:-10}"
+BASE_STREAM_SEED="${BASE_STREAM_SEED:-42}"
+DRIFT_FREQUENCIES="${DRIFT_FREQUENCIES:-200,400,500,750,1000,1250,1500,2000,2500,3000}"
+STREAM_LENGTH="${STREAM_LENGTH:-8000}"
+EVAL_STREAM_INDICES="${EVAL_STREAM_INDICES:-1,4,8}"
+GENERATORS="${GENERATORS:-SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2,SineClusters,WaveformDrift2}"
+SEED="${SEED:-1337}"
+N_TRIALS_EXPERT="${N_TRIALS_EXPERT:-100}"
+N_TRIALS_DEPLOYMENT="${N_TRIALS_DEPLOYMENT:-100}"
+PER_TRIAL_TIMEOUT="${PER_TRIAL_TIMEOUT:-1200}"
+OUTPUT_DIR="${OUTPUT_DIR:-split_pipeline/results}"
+N_JOBS_EXPERT="${N_JOBS_EXPERT:-7}"
 
-# Generalist: 7 * 100 detector trials + 100 deployment-equivalent trials = 800
-N_PROFILES=7
+# Profiles: if PROFILES env var is set, pass it through; otherwise use Python defaults.
+# N_PROFILES is derived from the number of comma-separated "name" fields in PROFILES,
+# or defaults to 7 (matching DEFAULT_PROFILES in expert_ensemble_optuna.py).
+if [[ -n "${PROFILES:-}" ]]; then
+    N_PROFILES=$(python -c "import json,sys; print(len(json.loads(sys.argv[1])))" "${PROFILES}")
+else
+    N_PROFILES="${N_PROFILES:-7}"
+fi
+
+# Generalist: N_PROFILES * expert trials + deployment trials
 N_TRIALS_GENERALIST=$((N_PROFILES * N_TRIALS_EXPERT + N_TRIALS_DEPLOYMENT))
 
 DETECTOR_TYPES=("BNDM" "CSDDM" "D3" "IBDD" "OCDD" "SPLL" "UDetect")
@@ -40,6 +48,7 @@ DETECTOR_TYPES=("BNDM" "CSDDM" "D3" "IBDD" "OCDD" "SPLL" "UDetect")
 export OPTUNA_STORAGE N_STREAMS BASE_STREAM_SEED DRIFT_FREQUENCIES STREAM_LENGTH
 export EVAL_STREAM_INDICES GENERATORS SEED N_TRIALS_EXPERT N_TRIALS_DEPLOYMENT PER_TRIAL_TIMEOUT
 export OUTPUT_DIR
+export PROFILES
 
 echo "=== Split Pipeline Submission ==="
 echo "  Storage:       ${OPTUNA_STORAGE}"

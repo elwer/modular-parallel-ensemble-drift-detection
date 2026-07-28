@@ -63,6 +63,9 @@ fi
 if [[ -n "${TOLERANCES:-}" ]]; then
     EXTRA_ARGS+=(--tolerances "${TOLERANCES}")
 fi
+if [[ -n "${PROFILES:-}" ]]; then
+    EXTRA_ARGS+=(--profiles "${PROFILES}")
+fi
 
 python "${PIPELINE_DIR}/generalist_optimize.py" \
     --optuna-storage "${OPTUNA_STORAGE}" \
