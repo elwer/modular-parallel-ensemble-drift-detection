@@ -185,6 +185,9 @@ def ensemble_decision(raw_results: List[bool], criterion: str) -> bool:
         return s > 0
     if criterion == "all":
         return s == n
+    if criterion.startswith("at_least_"):
+        k = int(criterion.split("_")[2])
+        return s >= k
     return s >= (n + 1) // 2  # majority
 
 
