@@ -205,6 +205,41 @@ def _eval_on_streams(eval_configs, eval_fn, seed):
     return macro, micro, f1s, tp_t, fp_t, fn_t
 
 
+def _run_pool(worker_fn, tasks, n_cpus, max_retries=3):
+    """Run tasks in a ProcessPoolExecutor with retry on BrokenProcessPool.
+    Each worker handles one task then gets recycled (max_tasks_per_child=1)
+    to prevent memory leaks and segfault accumulation."""
+    results = []
+    pending = list(tasks)
+    for attempt in range(max_retries + 1):
+        if not pending:
+            break
+        try:
+            with ProcessPoolExecutor(
+                max_workers=n_cpus, max_tasks_per_child=1
+            ) as pool:
+                futs = {pool.submit(worker_fn, t): t for t in pending}
+                pending = []
+                for fut in as_completed(futs):
+                    try:
+                        results.append(fut.result())
+                    except Exception as e:
+                        task = futs[fut]
+                        logger.warning(f"  Task failed (attempt {attempt+1}): {e}")
+                        pending.append(task)
+        except BrokenProcessPool as e:
+            logger.warning(f"  Pool broke (attempt {attempt+1}): {e}")
+            # pending already contains only uncompleted tasks
+            if not pending:
+                # All futures were submitted but pool died before completion
+                pending = [futs[f] for f in futs if not f.done()]
+        if pending and attempt < max_retries:
+            logger.info(f"  Retrying {len(pending)} failed tasks...")
+    if pending:
+        logger.error(f"  {len(pending)} tasks failed after {max_retries} retries")
+    return results
+
+
 # ============================================================
 # Worker functions (module-level for multiprocessing)
 # ============================================================
@@ -333,12 +368,10 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     t0 = time.time()
     expert_tasks = [(dd, sc, n_budget, SEED)
                     for dd in DETECTORS for sc in train_configs]
+    expert_results = _run_pool(_expert_worker, expert_tasks, n_cpus)
     experts: Dict[Tuple[str, int], dict] = {}
-    with ProcessPoolExecutor(max_workers=n_cpus) as pool:
-        futs = {pool.submit(_expert_worker, t): t for t in expert_tasks}
-        for fut in as_completed(futs):
-            r = fut.result()
-            experts[(r["dd_type"], r["stream_idx"])] = r
+    for r in expert_results:
+        experts[(r["dd_type"], r["stream_idx"])] = r
     logger.info(f"  Experts done in {time.time()-t0:.0f}s")
 
     # ---- Phase 2: Train generalists (7 DD types, m*n+n trials each) ----
@@ -347,13 +380,11 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     t0 = time.time()
     gen_tasks = [(dd, train_configs, n_gen_trials, SEED) for dd in DETECTORS]
     generalists: Dict[str, dict] = {}
-    with ProcessPoolExecutor(max_workers=n_cpus) as pool:
-        futs = {pool.submit(_generalist_worker, t): t for t in gen_tasks}
-        for fut in as_completed(futs):
-            r = fut.result()
-            generalists[r["dd_type"]] = r
-            logger.info(f"  Generalist {r['dd_type']}: "
-                        f"trainF1={r['best_train_f1']:.4f}")
+    gen_results = _run_pool(_generalist_worker, gen_tasks, n_cpus)
+    for r in gen_results:
+        generalists[r["dd_type"]] = r
+        logger.info(f"  Generalist {r['dd_type']}: "
+                    f"trainF1={r['best_train_f1']:.4f}")
     logger.info(f"  Generalists done in {time.time()-t0:.0f}s")
 
     # ---- Phase 3: Optimise deployment params for per-DD ensembles ----
@@ -367,13 +398,11 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
         deploy_tasks.append((dd_type, slots, train_configs, N_DEPLOY_TRIALS, SEED))
 
     per_dd_deploy: Dict[str, dict] = {}
-    with ProcessPoolExecutor(max_workers=n_cpus) as pool:
-        futs = {pool.submit(_deployment_worker, t): t for t in deploy_tasks}
-        for fut in as_completed(futs):
-            r = fut.result()
-            per_dd_deploy[r["dd_type"]] = r
-            logger.info(f"  Deploy {r['dd_type']}: "
-                        f"trainF1={r['best_train_f1']:.4f}")
+    deploy_results = _run_pool(_deployment_worker, deploy_tasks, n_cpus)
+    for r in deploy_results:
+        per_dd_deploy[r["dd_type"]] = r
+        logger.info(f"  Deploy {r['dd_type']}: "
+                    f"trainF1={r['best_train_f1']:.4f}")
     logger.info(f"  Deployment done in {time.time()-t0:.0f}s")
 
     # ---- Phase 4: Cross-DD ensemble selection + deployment ----
