@@ -249,15 +249,22 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
 
 def main():
     ap = argparse.ArgumentParser(description="Scalability study: ThreadsDeployment with increasing ensemble sizes")
-    ap.add_argument("--stream-length", type=int, default=2000)
-    ap.add_argument("--drift-frequency", type=int, default=500)
+    ap.add_argument("--stream-length", type=int, default=200)
+    ap.add_argument("--drift-frequency", type=int, default=100)
     ap.add_argument("--n-repeats", type=int, default=3,
                     help="Number of repeats per ensemble size (for variance)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--output-dir", type=str, default="results_scalability")
+    ap.add_argument("--max-ensemble-size", type=int, default=None,
+                    help="Limit max ensemble size (e.g. 8 for local runs)")
     args = ap.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+
+    ensemble_sizes = ENSEMBLE_SIZES
+    if args.max_ensemble_size is not None:
+        ensemble_sizes = [s for s in ENSEMBLE_SIZES if s <= args.max_ensemble_size]
+    max_pool_size = max(ensemble_sizes) if ensemble_sizes else max(ENSEMBLE_SIZES)
 
     all_results = []
 
@@ -269,7 +276,7 @@ def main():
     for rep in range(args.n_repeats):
         seed = args.seed + rep * 1000
         rng = random.Random(seed)
-        pool_names = build_pool(rng, n_total=max(ENSEMBLE_SIZES))
+        pool_names = build_pool(rng, n_total=max_pool_size)
         detectors = materialize_pool(pool_names, rng)
         for i, det in enumerate(detectors):
             logger.info(f"  Rep {rep+1}/{args.n_repeats} detector {i+1}/{len(detectors)} "
@@ -286,7 +293,7 @@ def main():
                         f"{result['latency_ms']:.2f} ms/sample")
 
     # ---- Ensemble runs ----
-    for size in ENSEMBLE_SIZES:
+    for size in ensemble_sizes:
         logger.info(f"\n{'='*60}")
         logger.info(f"Ensemble size: {size} detectors (ThreadsDeployment)")
         logger.info(f"{'='*60}")
@@ -343,7 +350,7 @@ def main():
           f"{'Wall time (s)':>15} {'Overhead':>10}")
     print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10}")
 
-    for size in ENSEMBLE_SIZES:
+    for size in ensemble_sizes:
         runs = [r for r in all_results if r.get("mode") == "ensemble" and r["n_detectors"] == size]
         tps = [r["throughput_sps"] for r in runs]
         lats = [r["latency_ms"] for r in runs]
