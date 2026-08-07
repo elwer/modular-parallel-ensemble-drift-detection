@@ -148,6 +148,34 @@ class _DummyMOPEDDS:
         self.in_suppression = False
 
 
+def run_single_benchmark(detector, stream_length, drift_frequency, seed):
+    """Run a single detector sequentially on a stream (no threading)."""
+    stream = build_stream("SineClusters", drift_frequency, stream_length, seed)
+    stream_iter = iter(stream)
+    first_x, _ = next(stream_iter)
+
+    # Warm up
+    detector.update(first_x)
+
+    t0 = time.perf_counter()
+    n_samples = 1
+    drift_count = 0
+    for x, _ in stream_iter:
+        if detector.update(x):
+            drift_count += 1
+        n_samples += 1
+    elapsed = time.perf_counter() - t0
+
+    return {
+        "n_detectors": 1,
+        "stream_length": n_samples,
+        "elapsed_sec": elapsed,
+        "throughput_sps": n_samples / elapsed if elapsed > 0 else 0,
+        "latency_ms": (elapsed / n_samples) * 1000 if n_samples > 0 else 0,
+        "drift_count": drift_count,
+    }
+
+
 def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
                               seed, decision_window=10):
     """Deploy n_detectors random DDs via ThreadsDeployment and run a stream."""
@@ -232,9 +260,35 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     all_results = []
+
+    # ---- Single-detector baselines ----
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Single-detector baselines (sequential, no threading)")
+    logger.info(f"{'='*60}")
+
+    for rep in range(args.n_repeats):
+        seed = args.seed + rep * 1000
+        rng = random.Random(seed)
+        pool_names = build_pool(rng, n_total=max(ENSEMBLE_SIZES))
+        detectors = materialize_pool(pool_names, rng)
+        for i, det in enumerate(detectors):
+            logger.info(f"  Rep {rep+1}/{args.n_repeats} detector {i+1}/{len(detectors)} "
+                        f"({pool_names[i]})")
+            result = run_single_benchmark(
+                det, args.stream_length, args.drift_frequency, seed)
+            result["rep"] = rep
+            result["seed"] = seed
+            result["mode"] = "single"
+            result["detector_type"] = pool_names[i]
+            result["detector_idx"] = i
+            all_results.append(result)
+            logger.info(f"  -> {result['throughput_sps']:.1f} sps, "
+                        f"{result['latency_ms']:.2f} ms/sample")
+
+    # ---- Ensemble runs ----
     for size in ENSEMBLE_SIZES:
         logger.info(f"\n{'='*60}")
-        logger.info(f"Ensemble size: {size} detectors")
+        logger.info(f"Ensemble size: {size} detectors (ThreadsDeployment)")
         logger.info(f"{'='*60}")
 
         for rep in range(args.n_repeats):
@@ -248,28 +302,64 @@ def main():
             )
             result["rep"] = rep
             result["seed"] = seed
+            result["mode"] = "ensemble"
             all_results.append(result)
             logger.info(f"  -> {result['throughput_sps']:.1f} sps, "
                         f"{result['latency_ms']:.2f} ms/sample, "
                         f"{result['elapsed_sec']:.2f}s total")
 
     # Summary table
-    print(f"\n{'='*80}")
+    import numpy as np
+
+    # Single-detector baselines
+    single_runs = [r for r in all_results if r.get("mode") == "single"]
+    single_times = [r["elapsed_sec"] for r in single_runs]
+    single_lats = [r["latency_ms"] for r in single_runs]
+    single_tps = [r["throughput_sps"] for r in single_runs]
+    # Baseline = slowest single detector (the bottleneck in a sequential pipeline)
+    slowest_single_time = max(single_times) if single_times else 0
+    slowest_single_lat = max(single_lats) if single_lats else 0
+    slowest_single_tps = min(single_tps) if single_tps else 0
+    # Also report mean and fastest for context
+    mean_single_time = np.mean(single_times) if single_times else 0
+    mean_single_lat = np.mean(single_lats) if single_lats else 0
+    mean_single_tps = np.mean(single_tps) if single_tps else 0
+    fastest_single_time = min(single_times) if single_times else 0
+    fastest_single_lat = min(single_lats) if single_lats else 0
+
+    print(f"\n{'='*95}")
     print(f"SCALABILITY SUMMARY  (stream_length={args.stream_length}, "
           f"drift_freq={args.drift_frequency}, repeats={args.n_repeats})")
-    print(f"{'='*80}")
-    print(f"{'K':>6} {'Throughput (sps)':>20} {'Latency (ms)':>15} {'Wall time (s)':>15}")
-    print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15}")
+    print(f"{'='*95}")
+    print(f"\n--- Single-detector baselines (sequential, no threading) ---")
+    print(f"  Fastest: {fastest_single_time:.3f}s  ({1000/fastest_single_time:.0f} sps)")
+    print(f"  Mean:    {mean_single_time:.3f}s  ({mean_single_tps:.0f} sps, {mean_single_lat:.2f} ms/sample)")
+    print(f"  Slowest: {slowest_single_time:.3f}s  ({slowest_single_tps:.0f} sps, {slowest_single_lat:.2f} ms/sample)")
+    print(f"  (across {len(single_runs)} individual detector runs)")
+    print(f"  Baseline = slowest single DD (bottleneck if run sequentially)")
 
-    import numpy as np
+    print(f"\n--- Ensemble (ThreadsDeployment, parallel) ---")
+    print(f"{'K':>6} {'Throughput (sps)':>20} {'Latency (ms)':>15} "
+          f"{'Wall time (s)':>15} {'Overhead':>10}")
+    print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10}")
+
     for size in ENSEMBLE_SIZES:
-        runs = [r for r in all_results if r["n_detectors"] == size]
+        runs = [r for r in all_results if r.get("mode") == "ensemble" and r["n_detectors"] == size]
         tps = [r["throughput_sps"] for r in runs]
         lats = [r["latency_ms"] for r in runs]
         times = [r["elapsed_sec"] for r in runs]
+        mean_ens_time = np.mean(times) if times else 0
+        # Overhead = ensemble_wall_time / slowest_single_time
+        # Ideal = 1.0 (all K detectors finish in the time of the slowest one)
+        overhead = mean_ens_time / slowest_single_time if slowest_single_time > 0 else 0
         print(f"{size:>6} {np.mean(tps):>10.1f}+/-{np.std(tps):>5.1f} "
               f"{np.mean(lats):>8.2f}+/-{np.std(lats):>4.2f} "
-              f"{np.mean(times):>8.2f}+/-{np.std(times):>4.2f}")
+              f"{np.mean(times):>8.2f}+/-{np.std(times):>4.2f} "
+              f"{overhead:>6.2f}x")
+
+    print(f"\n  Overhead = ensemble_wall_time / slowest_single_time")
+    print(f"  Ideal overhead = 1.0x (K detectors in parallel take same time as slowest alone)")
+    print(f"  Overhead > 1.0 = communication/synchronization cost of threading")
 
     # Save JSON
     out_path = os.path.join(args.output_dir, "scalability_results.json")
@@ -282,10 +372,13 @@ def main():
     csv_path = os.path.join(args.output_dir, "scalability_summary.csv")
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["n_detectors", "rep", "throughput_sps", "latency_ms", "elapsed_sec", "drift_count"])
+        w.writerow(["mode", "n_detectors", "rep", "throughput_sps", "latency_ms",
+                     "elapsed_sec", "drift_count", "detector_type"])
         for r in all_results:
-            w.writerow([r["n_detectors"], r["rep"], r["throughput_sps"],
-                        r["latency_ms"], r["elapsed_sec"], r["drift_count"]])
+            w.writerow([r.get("mode", "ensemble"), r["n_detectors"], r["rep"],
+                        r["throughput_sps"], r["latency_ms"],
+                        r["elapsed_sec"], r["drift_count"],
+                        r.get("detector_type", "")])
     logger.info(f"CSV saved to {csv_path}")
 
 
