@@ -35,6 +35,9 @@ export PYTHON_GIL=0
 DRIFT_FREQS="${DRIFT_FREQS:-200,400,500,750,1000,1250,1500,2000}"
 STREAM_LENGTH="${STREAM_LENGTH:-5000}"
 N_BUDGET="${N_BUDGET:-30}"
+N_BUDGET_MAX="${N_BUDGET_MAX:-75}"
+N_BUDGET_STEP="${N_BUDGET_STEP:-15}"
+ENSEMBLE_F1_THRESHOLD="${ENSEMBLE_F1_THRESHOLD:-0.8}"
 N_DEPLOY_TRIALS="${N_DEPLOY_TRIALS:-30}"
 N_FOLDS="${N_FOLDS:-10}"
 N_CPUS="${N_CPUS:-32}"
@@ -49,6 +52,9 @@ python -u run_ensemble_vs_generalist.py \
     --drift-freqs "${DRIFT_FREQS}" \
     --stream-length "${STREAM_LENGTH}" \
     --n-budget "${N_BUDGET}" \
+    --n-budget-max "${N_BUDGET_MAX}" \
+    --n-budget-step "${N_BUDGET_STEP}" \
+    --ensemble-f1-threshold "${ENSEMBLE_F1_THRESHOLD}" \
     --n-deploy-trials "${N_DEPLOY_TRIALS}" \
     --n-folds "${N_FOLDS}" \
     --n-cpus "${N_CPUS}" \

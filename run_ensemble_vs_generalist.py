@@ -57,6 +57,9 @@ DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD"]
 DRIFT_FREQS = [200, 500, 1000]
 STREAM_LENGTH = 2000
 N_BUDGET = 9
+N_BUDGET_MAX = 75
+N_BUDGET_STEP = 15
+ENSEMBLE_F1_THRESHOLD = 0.8
 N_FOLDS = 2
 N_DEPLOY_TRIALS = 10
 N_CPUS = 8
@@ -383,16 +386,9 @@ def _deployment_worker(args):
 # Fold runner
 # ============================================================
 
-def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
-    logger.info(f"\n{'='*70}")
-    logger.info(f"FOLD {fold}")
-    logger.info(f"{'='*70}")
-
-    train_configs = get_stream_configs(fold, "train")
-    val_configs = get_stream_configs(fold, "val")
-    test_configs = get_stream_configs(fold, "test")
+def _run_ensemble_pipeline(fold, n_budget, n_cpus, train_configs, val_configs, test_configs):
+    """Train experts, optimize deployment, evaluate ensembles. Returns (fold_result_partial, avg_ens_f1)."""
     trials_per_expert = max(1, n_budget // N_ENSEMBLE_K)
-    n_gen_trials = M_STREAMS * n_budget + N_DEPLOY_TRIALS
 
     # ---- Phase 1: Train K experts per (DD type, stream) ----
     total_experts = M_STREAMS * len(DETECTORS) * N_ENSEMBLE_K
@@ -409,21 +405,8 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
         experts[(r["dd_type"], r["stream_idx"], r["expert_idx"])] = r
     logger.info(f"  Experts done in {time.time()-t0:.0f}s")
 
-    # ---- Phase 2: Train generalists (same budget) ----
-    logger.info(f"Phase 2: Training {len(DETECTORS)} generalists "
-                f"({n_gen_trials} trials each)")
-    t0 = time.time()
-    gen_tasks = [(dd, train_configs, n_gen_trials, SEED) for dd in DETECTORS]
-    generalists: Dict[str, dict] = {}
-    gen_results = _run_pool(_generalist_worker, gen_tasks, n_cpus)
-    for r in gen_results:
-        generalists[r["dd_type"]] = r
-        logger.info(f"  Generalist {r['dd_type']}: "
-                    f"trainF1={r['best_train_f1']:.4f}")
-    logger.info(f"  Generalists done in {time.time()-t0:.0f}s")
-
-    # ---- Phase 3: Per-DD ensemble deployment (K experts per stream) ----
-    logger.info(f"Phase 3: Per-DD ensemble deployment optimisation "
+    # ---- Phase 2: Per-DD ensemble deployment (K experts per stream) ----
+    logger.info(f"Phase 2: Per-DD ensemble deployment optimisation "
                 f"({N_DEPLOY_TRIALS} trials each, K={N_ENSEMBLE_K} experts per stream)")
     t0 = time.time()
     deploy_tasks = []
@@ -445,8 +428,8 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
                     f"trainF1={r['best_train_f1']:.4f} valF1={r['best_val_f1']:.4f}")
     logger.info(f"  Deployment done in {time.time()-t0:.0f}s")
 
-    # ---- Phase 4: Cross-DD ensemble (best DD type per stream on val) ----
-    logger.info("Phase 4: Cross-DD ensemble selection (val F1) + deployment optimisation")
+    # ---- Phase 3: Cross-DD ensemble (best DD type per stream on val) ----
+    logger.info("Phase 3: Cross-DD ensemble selection (val F1) + deployment optimisation")
     cross_per_stream_slots = {}
     cross_dd_selection = {}
     for sc_val in val_configs:
@@ -477,33 +460,10 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     logger.info(f"  Cross-DD deploy: trainF1={cross_deploy['best_train_f1']:.4f} "
                 f"valF1={cross_deploy['best_val_f1']:.4f}")
 
-    # ---- Phase 5: Evaluate on test streams ----
-    logger.info("Phase 5: Evaluation on test streams")
+    # ---- Phase 4: Evaluate ensembles on test streams ----
+    logger.info("Phase 4: Ensemble evaluation on test streams")
 
-    fold_result = {
-        "fold": fold,
-        "experts": {f"{k[0]}_{k[1]}_{k[2]}": v for k, v in experts.items()},
-        "generalists": generalists,
-        "generalists_eval": {},
-        "per_dd_ensembles": {},
-        "cross_dd_ensemble": {},
-    }
-
-    # Generalists
-    for dd_type in DETECTORS:
-        gen = generalists[dd_type]
-        macro, micro, f1s, tp, fp, fn = _eval_on_streams(
-            test_configs,
-            lambda sc, s, _dt=dd_type, _bp=gen["best_params"]:
-                run_single_detector(_dt, _bp, sc, s),
-            SEED)
-        fold_result["generalists_eval"][dd_type] = {
-            "macro_f1": macro, "micro_f1": micro,
-            "per_stream_f1": f1s, "tp": tp, "fp": fp, "fn": fn,
-        }
-        logger.info(f"  Gen-{dd_type} eval: macroF1={macro:.4f}")
-
-    # Per-DD ensembles (per-stream K experts)
+    per_dd_ensembles = {}
     for dd_type in DETECTORS:
         dep = per_dd_deploy[dd_type]
         p = dep["best_params"]
@@ -517,7 +477,7 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
                     _p["det_criterion"], _p["ens_criterion"],
                     _p["decision_window"]),
             SEED)
-        fold_result["per_dd_ensembles"][dd_type] = {
+        per_dd_ensembles[dd_type] = {
             "macro_f1": macro, "micro_f1": micro,
             "per_stream_f1": f1s, "tp": tp, "fp": fp, "fn": fn,
             "deployment_params": p,
@@ -534,13 +494,106 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
                 _p["det_criterion"], _p["ens_criterion"],
                 _p["decision_window"]),
         SEED)
-    fold_result["cross_dd_ensemble"] = {
+    cross_dd_ensemble = {
         "macro_f1": macro, "micro_f1": micro,
         "per_stream_f1": f1s, "tp": tp, "fp": fp, "fn": fn,
         "deployment_params": p,
         "selection": cross_dd_selection,
     }
     logger.info(f"  Cross-DD ensemble eval: macroF1={macro:.4f}")
+
+    avg_ens_f1 = np.mean([per_dd_ensembles[dd]["macro_f1"] for dd in DETECTORS])
+    logger.info(f"  Avg per-DD ensemble macroF1={avg_ens_f1:.4f}")
+
+    partial = {
+        "experts": {f"{k[0]}_{k[1]}_{k[2]}": v for k, v in experts.items()},
+        "per_dd_ensembles": per_dd_ensembles,
+        "cross_dd_ensemble": cross_dd_ensemble,
+        "n_budget_used": n_budget,
+    }
+    return partial, avg_ens_f1
+
+
+def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
+    logger.info(f"\n{'='*70}")
+    logger.info(f"FOLD {fold}")
+    logger.info(f"{'='*70}")
+
+    train_configs = get_stream_configs(fold, "train")
+    val_configs = get_stream_configs(fold, "val")
+    test_configs = get_stream_configs(fold, "test")
+
+    # ---- Adaptive ensemble budget search ----
+    current_budget = n_budget
+    best_partial = None
+    best_avg_f1 = -1.0
+
+    while True:
+        logger.info(f"\n--- Trying ensemble budget N_BUDGET={current_budget} "
+                    f"({current_budget // N_ENSEMBLE_K} trials/expert) ---")
+        partial, avg_f1 = _run_ensemble_pipeline(
+            fold, current_budget, n_cpus, train_configs, val_configs, test_configs)
+
+        if avg_f1 > best_avg_f1:
+            best_avg_f1 = avg_f1
+            best_partial = partial
+
+        if avg_f1 >= ENSEMBLE_F1_THRESHOLD:
+            logger.info(f"  Ensemble avg F1={avg_f1:.4f} >= {ENSEMBLE_F1_THRESHOLD} "
+                        f"— threshold met, proceeding to generalist training")
+            break
+        elif current_budget >= N_BUDGET_MAX:
+            logger.info(f"  Ensemble avg F1={avg_f1:.4f} < {ENSEMBLE_F1_THRESHOLD} "
+                        f"but max budget {N_BUDGET_MAX} reached — proceeding with best so far")
+            break
+        else:
+            next_budget = min(current_budget + N_BUDGET_STEP, N_BUDGET_MAX)
+            logger.info(f"  Ensemble avg F1={avg_f1:.4f} < {ENSEMBLE_F1_THRESHOLD} "
+                        f"— increasing budget from {current_budget} to {next_budget}")
+            current_budget = next_budget
+
+    # Use best result
+    n_budget_used = best_partial["n_budget_used"]
+    n_gen_trials = M_STREAMS * n_budget_used + N_DEPLOY_TRIALS
+
+    fold_result = {
+        "fold": fold,
+        "n_budget_ensemble": n_budget_used,
+        "ensemble_f1_threshold": ENSEMBLE_F1_THRESHOLD,
+        "experts": best_partial["experts"],
+        "generalists": {},
+        "generalists_eval": {},
+        "per_dd_ensembles": best_partial["per_dd_ensembles"],
+        "cross_dd_ensemble": best_partial["cross_dd_ensemble"],
+    }
+
+    # ---- Phase 5: Train generalists and evaluate ----
+    logger.info(f"\nPhase 5: Training {len(DETECTORS)} generalists "
+                f"({n_gen_trials} trials each, matching ensemble budget {n_budget_used}) + evaluation")
+    t0 = time.time()
+    gen_tasks = [(dd, train_configs, n_gen_trials, SEED) for dd in DETECTORS]
+    generalists: Dict[str, dict] = {}
+    gen_results = _run_pool(_generalist_worker, gen_tasks, n_cpus)
+    for r in gen_results:
+        generalists[r["dd_type"]] = r
+        logger.info(f"  Generalist {r['dd_type']}: "
+                    f"trainF1={r['best_train_f1']:.4f}")
+    logger.info(f"  Generalists done in {time.time()-t0:.0f}s")
+
+    fold_result["generalists"] = generalists
+
+    for dd_type in DETECTORS:
+        gen = generalists[dd_type]
+        macro, micro, f1s, tp, fp, fn = _eval_on_streams(
+            test_configs,
+            lambda sc, s, _dt=dd_type, _bp=gen["best_params"]:
+                run_single_detector(_dt, _bp, sc, s),
+            SEED)
+        fold_result["generalists_eval"][dd_type] = {
+            "macro_f1": macro, "micro_f1": micro,
+            "per_stream_f1": f1s, "tp": tp, "fp": fp, "fn": fn,
+        }
+        logger.info(f"  Gen-{dd_type} eval: macroF1={macro:.4f}")
 
     return fold_result
 
@@ -613,6 +666,7 @@ def main():
     global EXPERT_TRIAL_TIMEOUT, GENERALIST_TRIAL_TIMEOUT, OUTPUT_DIR
     global M_STREAMS, GENERATORS_LIST, DRIFT_FREQS_LIST, TOLERANCES_LIST
     global SUPPRESSIONS_LIST, N_GENERALIST_TRIALS
+    global N_BUDGET_MAX, N_BUDGET_STEP, ENSEMBLE_F1_THRESHOLD
 
     ap = argparse.ArgumentParser(description="Ensemble vs Generalist Comparison")
     ap.add_argument("--n-folds", type=int, default=N_FOLDS)
@@ -625,6 +679,12 @@ def main():
     ap.add_argument("--expert-timeout", type=int, default=None)
     ap.add_argument("--generalist-timeout", type=int, default=None)
     ap.add_argument("--output-dir", type=str, default=OUTPUT_DIR)
+    ap.add_argument("--n-budget-max", type=int, default=N_BUDGET_MAX,
+                    help="Max ensemble budget for adaptive search")
+    ap.add_argument("--n-budget-step", type=int, default=N_BUDGET_STEP,
+                    help="Budget increment for adaptive search")
+    ap.add_argument("--ensemble-f1-threshold", type=float, default=ENSEMBLE_F1_THRESHOLD,
+                    help="Avg ensemble F1 threshold to stop budget search")
     args = ap.parse_args()
 
     if args.drift_freqs:
@@ -639,6 +699,9 @@ def main():
     if args.generalist_timeout:
         GENERALIST_TRIAL_TIMEOUT = args.generalist_timeout
     OUTPUT_DIR = args.output_dir
+    N_BUDGET_MAX = args.n_budget_max
+    N_BUDGET_STEP = args.n_budget_step
+    ENSEMBLE_F1_THRESHOLD = args.ensemble_f1_threshold
 
     M_STREAMS = len(DRIFT_FREQS) * 2
     GENERATORS_LIST = []
