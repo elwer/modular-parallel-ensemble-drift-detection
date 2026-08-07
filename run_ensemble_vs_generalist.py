@@ -56,10 +56,11 @@ DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD"]
 
 DRIFT_FREQS = [200, 500, 1000]
 STREAM_LENGTH = 2000
-N_BUDGET = 7
+N_BUDGET = 9
 N_FOLDS = 2
 N_DEPLOY_TRIALS = 10
 N_CPUS = 8
+N_ENSEMBLE_K = 3
 SEED = 1337
 BASE_STREAM_SEED = 42
 OUTPUT_DIR = "results_ensemble_vs_generalist"
@@ -249,15 +250,16 @@ def _run_pool(worker_fn, tasks, n_cpus, max_retries=3):
 # ============================================================
 
 def _expert_worker(args):
-    dd_type, sc, n_trials, seed = args
+    dd_type, sc, n_trials, seed, expert_idx = args
     max_window = int(sc["drift_frequency"] * MAX_WINDOW_FRACTION)
+    expert_seed = seed + expert_idx * 10000
 
     def objective(trial):
         params = _suggest_detector_params(trial, "", dd_type, max_window=max_window)
         signal.signal(signal.SIGALRM, _timeout_handler)
         signal.alarm(EXPERT_TRIAL_TIMEOUT)
         try:
-            f1, _, _, _ = run_single_detector(dd_type, params, sc, seed)
+            f1, _, _, _ = run_single_detector(dd_type, params, sc, expert_seed)
             return f1
         except Exception:
             return 0.0
@@ -266,13 +268,14 @@ def _expert_worker(args):
 
     study = optuna.create_study(
         direction="maximize",
-        sampler=TPESampler(seed=seed),
+        sampler=TPESampler(seed=expert_seed),
         pruner=MedianPruner(n_startup_trials=5, n_warmup_steps=1),
     )
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
     return {
         "dd_type": dd_type,
         "stream_idx": sc["stream_idx"],
+        "expert_idx": expert_idx,
         "best_params": dict(study.best_trial.params),
         "best_train_f1": float(study.best_trial.value),
     }
@@ -315,7 +318,7 @@ def _generalist_worker(args):
 
 
 def _deployment_worker(args):
-    dd_type, slot_specs, stream_configs, n_trials, seed = args
+    dd_type, per_stream_slots, stream_configs, val_configs, n_trials, seed = args
 
     def objective(trial):
         det_crit = trial.suggest_categorical("det_criterion", ["any", "all", "majority"])
@@ -327,8 +330,9 @@ def _deployment_worker(args):
         try:
             f1s = []
             for i, sc in enumerate(stream_configs):
+                slots = per_stream_slots[sc["stream_idx"]]
                 f1, _, _, _ = run_ensemble_eval(
-                    slot_specs, sc, seed, det_crit, ens_crit, dw)
+                    slots, sc, seed, det_crit, ens_crit, dw)
                 f1s.append(f1)
                 trial.report(sum(f1s) / len(f1s), i)
                 if trial.should_prune():
@@ -347,10 +351,31 @@ def _deployment_worker(args):
         pruner=MedianPruner(n_startup_trials=3, n_warmup_steps=2),
     )
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if not completed:
+        completed = [study.best_trial]
+
+    best_val_f1, best_trial = -1.0, None
+    for t in completed:
+        p = t.params
+        val_f1s = []
+        for sc in val_configs:
+            slots = per_stream_slots[sc["stream_idx"]]
+            f1, _, _, _ = run_ensemble_eval(
+                slots, sc, seed,
+                p["det_criterion"], p["ens_criterion"], p["decision_window"])
+            val_f1s.append(f1)
+        val_f1 = sum(val_f1s) / len(val_f1s) if val_f1s else 0.0
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_trial = t
+
     return {
         "dd_type": dd_type,
-        "best_params": dict(study.best_trial.params),
-        "best_train_f1": float(study.best_trial.value),
+        "best_params": dict(best_trial.params),
+        "best_train_f1": float(best_trial.value),
+        "best_val_f1": float(best_val_f1),
     }
 
 
@@ -366,21 +391,25 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     train_configs = get_stream_configs(fold, "train")
     val_configs = get_stream_configs(fold, "val")
     test_configs = get_stream_configs(fold, "test")
+    trials_per_expert = max(1, n_budget // N_ENSEMBLE_K)
     n_gen_trials = M_STREAMS * n_budget + N_DEPLOY_TRIALS
 
-    # ---- Phase 1: Train experts (m streams x 7 DD types) ----
-    logger.info(f"Phase 1: Training {M_STREAMS * len(DETECTORS)} experts "
-                f"({n_budget} trials each)")
+    # ---- Phase 1: Train K experts per (DD type, stream) ----
+    total_experts = M_STREAMS * len(DETECTORS) * N_ENSEMBLE_K
+    logger.info(f"Phase 1: Training {total_experts} experts "
+                f"({N_ENSEMBLE_K}x{trials_per_expert} trials per DD per stream)")
     t0 = time.time()
-    expert_tasks = [(dd, sc, n_budget, SEED)
-                    for dd in DETECTORS for sc in train_configs]
+    expert_tasks = [(dd, sc, trials_per_expert, SEED, k)
+                    for dd in DETECTORS
+                    for sc in train_configs
+                    for k in range(N_ENSEMBLE_K)]
     expert_results = _run_pool(_expert_worker, expert_tasks, n_cpus)
-    experts: Dict[Tuple[str, int], dict] = {}
+    experts: Dict[Tuple[str, int, int], dict] = {}
     for r in expert_results:
-        experts[(r["dd_type"], r["stream_idx"])] = r
+        experts[(r["dd_type"], r["stream_idx"], r["expert_idx"])] = r
     logger.info(f"  Experts done in {time.time()-t0:.0f}s")
 
-    # ---- Phase 2: Train generalists (7 DD types, m*n+n trials each) ----
+    # ---- Phase 2: Train generalists (same budget) ----
     logger.info(f"Phase 2: Training {len(DETECTORS)} generalists "
                 f"({n_gen_trials} trials each)")
     t0 = time.time()
@@ -393,41 +422,49 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
                     f"trainF1={r['best_train_f1']:.4f}")
     logger.info(f"  Generalists done in {time.time()-t0:.0f}s")
 
-    # ---- Phase 3: Optimise deployment params for per-DD ensembles ----
+    # ---- Phase 3: Per-DD ensemble deployment (K experts per stream) ----
     logger.info(f"Phase 3: Per-DD ensemble deployment optimisation "
-                f"({N_DEPLOY_TRIALS} trials each)")
+                f"({N_DEPLOY_TRIALS} trials each, K={N_ENSEMBLE_K} experts per stream)")
     t0 = time.time()
     deploy_tasks = []
     for dd_type in DETECTORS:
-        slots = [(dd_type, experts[(dd_type, sc["stream_idx"])]["best_params"])
-                 for sc in train_configs]
-        deploy_tasks.append((dd_type, slots, train_configs, N_DEPLOY_TRIALS, SEED))
+        per_stream_slots = {}
+        for sc in train_configs:
+            s_idx = sc["stream_idx"]
+            slots = [(dd_type, experts[(dd_type, s_idx, k)]["best_params"])
+                     for k in range(N_ENSEMBLE_K)]
+            per_stream_slots[s_idx] = slots
+        deploy_tasks.append((dd_type, per_stream_slots, train_configs, val_configs,
+                             N_DEPLOY_TRIALS, SEED))
 
     per_dd_deploy: Dict[str, dict] = {}
     deploy_results = _run_pool(_deployment_worker, deploy_tasks, n_cpus)
     for r in deploy_results:
         per_dd_deploy[r["dd_type"]] = r
         logger.info(f"  Deploy {r['dd_type']}: "
-                    f"trainF1={r['best_train_f1']:.4f}")
+                    f"trainF1={r['best_train_f1']:.4f} valF1={r['best_val_f1']:.4f}")
     logger.info(f"  Deployment done in {time.time()-t0:.0f}s")
 
-    # ---- Phase 4: Cross-DD ensemble selection by val F1 + deployment ----
+    # ---- Phase 4: Cross-DD ensemble (best DD type per stream on val) ----
     logger.info("Phase 4: Cross-DD ensemble selection (val F1) + deployment optimisation")
-    cross_dd_slots: List[Tuple[str, dict]] = []
+    cross_per_stream_slots = {}
     cross_dd_selection = {}
     for sc_val in val_configs:
         s_idx = sc_val["stream_idx"]
-        best_f1, best_dd, best_p = -1.0, None, None
+        best_f1, best_dd = -1.0, None
         for dd_type in DETECTORS:
-            exp = experts.get((dd_type, s_idx))
-            if exp:
-                f1, _, _, _ = run_single_detector(dd_type, exp["best_params"], sc_val, SEED)
-                if f1 > best_f1:
-                    best_f1 = f1
-                    best_dd = dd_type
-                    best_p = exp["best_params"]
+            for k in range(N_ENSEMBLE_K):
+                exp = experts.get((dd_type, s_idx, k))
+                if exp:
+                    f1, _, _, _ = run_single_detector(
+                        dd_type, exp["best_params"], sc_val, SEED + k * 10000)
+                    if f1 > best_f1:
+                        best_f1 = f1
+                        best_dd = dd_type
         if best_dd:
-            cross_dd_slots.append((best_dd, best_p))
+            slots = [(best_dd, experts[(best_dd, s_idx, k)]["best_params"])
+                     for k in range(N_ENSEMBLE_K)]
+            cross_per_stream_slots[s_idx] = slots
             cross_dd_selection[s_idx] = {
                 "dd_type": best_dd, "val_f1": best_f1,
             }
@@ -435,15 +472,17 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
                         f"(valF1={best_f1:.4f})")
 
     cross_deploy = _deployment_worker(
-        ("cross_dd", cross_dd_slots, train_configs, N_DEPLOY_TRIALS, SEED))
-    logger.info(f"  Cross-DD deploy: trainF1={cross_deploy['best_train_f1']:.4f}")
+        ("cross_dd", cross_per_stream_slots, train_configs, val_configs,
+         N_DEPLOY_TRIALS, SEED))
+    logger.info(f"  Cross-DD deploy: trainF1={cross_deploy['best_train_f1']:.4f} "
+                f"valF1={cross_deploy['best_val_f1']:.4f}")
 
     # ---- Phase 5: Evaluate on test streams ----
     logger.info("Phase 5: Evaluation on test streams")
 
     fold_result = {
         "fold": fold,
-        "experts": {f"{k[0]}_{k[1]}": v for k, v in experts.items()},
+        "experts": {f"{k[0]}_{k[1]}_{k[2]}": v for k, v in experts.items()},
         "generalists": generalists,
         "generalists_eval": {},
         "per_dd_ensembles": {},
@@ -464,18 +503,19 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
         }
         logger.info(f"  Gen-{dd_type} eval: macroF1={macro:.4f}")
 
-    # Per-DD ensembles
+    # Per-DD ensembles (per-stream K experts)
     for dd_type in DETECTORS:
         dep = per_dd_deploy[dd_type]
-        slots = [(dd_type, experts[(dd_type, sc["stream_idx"])]["best_params"])
-                 for sc in train_configs]
         p = dep["best_params"]
         macro, micro, f1s, tp, fp, fn = _eval_on_streams(
             test_configs,
-            lambda sc, s, _slots=slots, _p=p:
-                run_ensemble_eval(_slots, sc, s,
-                                  _p["det_criterion"], _p["ens_criterion"],
-                                  _p["decision_window"]),
+            lambda sc, s, _dt=dd_type, _p=p:
+                run_ensemble_eval(
+                    [(dd_type, experts[(dd_type, sc["stream_idx"], k)]["best_params"])
+                     for k in range(N_ENSEMBLE_K)],
+                    sc, s,
+                    _p["det_criterion"], _p["ens_criterion"],
+                    _p["decision_window"]),
             SEED)
         fold_result["per_dd_ensembles"][dd_type] = {
             "macro_f1": macro, "micro_f1": micro,
@@ -488,10 +528,11 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     p = cross_deploy["best_params"]
     macro, micro, f1s, tp, fp, fn = _eval_on_streams(
         test_configs,
-        lambda sc, s, _slots=cross_dd_slots, _p=p:
-            run_ensemble_eval(_slots, sc, s,
-                              _p["det_criterion"], _p["ens_criterion"],
-                              _p["decision_window"]),
+        lambda sc, s, _slots_map=cross_per_stream_slots, _p=p:
+            run_ensemble_eval(
+                _slots_map[sc["stream_idx"]], sc, s,
+                _p["det_criterion"], _p["ens_criterion"],
+                _p["decision_window"]),
         SEED)
     fold_result["cross_dd_ensemble"] = {
         "macro_f1": macro, "micro_f1": micro,
