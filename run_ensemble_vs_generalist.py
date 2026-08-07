@@ -52,30 +52,31 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ============================================================
 
-DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD", "BNDM"]
+DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD"]
 
 DRIFT_FREQS = [200, 500, 1000]
 STREAM_LENGTH = 2000
-N_BUDGET = 15
+N_BUDGET = 7
 N_FOLDS = 2
-N_DEPLOY_TRIALS = 25
-N_CPUS = 4
+N_DEPLOY_TRIALS = 10
+N_CPUS = 8
 SEED = 1337
 BASE_STREAM_SEED = 42
-SUPPRESSION = 50
 OUTPUT_DIR = "results_ensemble_vs_generalist"
 EXPERT_TRIAL_TIMEOUT = 60
 GENERALIST_TRIAL_TIMEOUT = 300
 
-M_STREAMS = len(DRIFT_FREQS) * 2  # 10
+M_STREAMS = len(DRIFT_FREQS) * 2  # 6
 
 GENERATORS_LIST: List[str] = []
 DRIFT_FREQS_LIST: List[int] = []
 TOLERANCES_LIST: List[int] = []
+SUPPRESSIONS_LIST: List[int] = []
 for freq in DRIFT_FREQS:
     GENERATORS_LIST.extend(["SineClusters", "WaveformDrift2"])
     DRIFT_FREQS_LIST.extend([freq, freq])
-    TOLERANCES_LIST.extend([100, 100])
+    TOLERANCES_LIST.extend([freq // 10, freq // 10])
+    SUPPRESSIONS_LIST.extend([freq // 2, freq // 2])
 
 N_GENERALIST_TRIALS = M_STREAMS * N_BUDGET + N_DEPLOY_TRIALS  # m*n + deploy
 
@@ -96,8 +97,8 @@ def _timeout_handler(signum, frame):
 # Stream helpers
 # ============================================================
 
-def get_stream_configs(fold: int, train: bool = True) -> List[dict]:
-    seed_offset = 0 if train else 10000
+def get_stream_configs(fold: int, split: str = "train") -> List[dict]:
+    seed_offset = {"train": 0, "val": 5000, "test": 10000}[split]
     return [
         {
             "generator": GENERATORS_LIST[i],
@@ -105,6 +106,7 @@ def get_stream_configs(fold: int, train: bool = True) -> List[dict]:
             "stream_length": STREAM_LENGTH,
             "stream_seed": BASE_STREAM_SEED + seed_offset + fold * 100 + i,
             "tolerance": TOLERANCES_LIST[i],
+            "suppression": SUPPRESSIONS_LIST[i],
             "stream_idx": i,
         }
         for i in range(M_STREAMS)
@@ -127,7 +129,7 @@ def _f05_from_counts(tp: int, fp: int, fn: int) -> float:
     return (1.25 * precision * recall) / (0.25 * precision + recall)
 
 
-def run_single_detector(kind, params, sc, seed, suppression=SUPPRESSION):
+def run_single_detector(kind, params, sc, seed, suppression=None):
     """Run a single detector on a stream.  Iterates the stream directly
     so that _TrialTimeout propagates correctly (run_ensemble in
     main_synthetic swallows all exceptions)."""
@@ -142,14 +144,15 @@ def run_single_detector(kind, params, sc, seed, suppression=SUPPRESSION):
         triggered = bool(det.update(x))
         if triggered:
             raw.append(i)
-    dets = apply_suppression(raw, suppression)
+    supp = suppression if suppression is not None else sc["suppression"]
+    dets = apply_suppression(raw, supp)
     tp, fp, fn, _ = evaluate_detections(dets, known, sc["tolerance"])
     return _f1_from_counts(tp, fp, fn), tp, fp, fn
 
 
 def run_ensemble_eval(slot_specs, sc, seed,
                       det_criterion="any", ens_criterion="any",
-                      decision_window=1, suppression=SUPPRESSION):
+                      decision_window=1, suppression=None):
     """Run an ensemble of detectors on a stream.  Iterates the stream
     directly so that _TrialTimeout propagates correctly."""
     from collections import deque
@@ -187,7 +190,8 @@ def run_ensemble_eval(slot_specs, sc, seed,
             ens = ns >= (nd + 1) // 2
         if ens:
             raw.append(i)
-    dets = apply_suppression(raw, suppression)
+    supp = suppression if suppression is not None else sc["suppression"]
+    dets = apply_suppression(raw, supp)
     tp, fp, fn, _ = evaluate_detections(dets, known, sc["tolerance"])
     return _f1_from_counts(tp, fp, fn), tp, fp, fn
 
@@ -317,7 +321,6 @@ def _deployment_worker(args):
         det_crit = trial.suggest_categorical("det_criterion", ["any", "all", "majority"])
         ens_crit = trial.suggest_categorical("ens_criterion", ["any", "all", "majority"])
         dw = trial.suggest_int("decision_window", 1, 20)
-        supp = trial.suggest_int("suppression", 0, 200)
 
         signal.signal(signal.SIGALRM, _timeout_handler)
         signal.alarm(GENERALIST_TRIAL_TIMEOUT)
@@ -325,14 +328,16 @@ def _deployment_worker(args):
             f1s = []
             for i, sc in enumerate(stream_configs):
                 f1, _, _, _ = run_ensemble_eval(
-                    slot_specs, sc, seed, det_crit, ens_crit, dw, supp)
+                    slot_specs, sc, seed, det_crit, ens_crit, dw)
                 f1s.append(f1)
                 trial.report(sum(f1s) / len(f1s), i)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
             return sum(f1s) / len(f1s)
+        except optuna.TrialPruned:
+            raise
         except Exception:
-            return 0.0
+            raise optuna.TrialPruned()
         finally:
             signal.alarm(0)
 
@@ -358,8 +363,9 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     logger.info(f"FOLD {fold}")
     logger.info(f"{'='*70}")
 
-    train_configs = get_stream_configs(fold, train=True)
-    eval_configs = get_stream_configs(fold, train=False)
+    train_configs = get_stream_configs(fold, "train")
+    val_configs = get_stream_configs(fold, "val")
+    test_configs = get_stream_configs(fold, "test")
     n_gen_trials = M_STREAMS * n_budget + N_DEPLOY_TRIALS
 
     # ---- Phase 1: Train experts (m streams x 7 DD types) ----
@@ -405,32 +411,35 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
                     f"trainF1={r['best_train_f1']:.4f}")
     logger.info(f"  Deployment done in {time.time()-t0:.0f}s")
 
-    # ---- Phase 4: Cross-DD ensemble selection + deployment ----
-    logger.info("Phase 4: Cross-DD ensemble selection + deployment optimisation")
+    # ---- Phase 4: Cross-DD ensemble selection by val F1 + deployment ----
+    logger.info("Phase 4: Cross-DD ensemble selection (val F1) + deployment optimisation")
     cross_dd_slots: List[Tuple[str, dict]] = []
     cross_dd_selection = {}
-    for sc in train_configs:
+    for sc_val in val_configs:
+        s_idx = sc_val["stream_idx"]
         best_f1, best_dd, best_p = -1.0, None, None
         for dd_type in DETECTORS:
-            exp = experts.get((dd_type, sc["stream_idx"]))
-            if exp and exp["best_train_f1"] > best_f1:
-                best_f1 = exp["best_train_f1"]
-                best_dd = dd_type
-                best_p = exp["best_params"]
+            exp = experts.get((dd_type, s_idx))
+            if exp:
+                f1, _, _, _ = run_single_detector(dd_type, exp["best_params"], sc_val, SEED)
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_dd = dd_type
+                    best_p = exp["best_params"]
         if best_dd:
             cross_dd_slots.append((best_dd, best_p))
-            cross_dd_selection[sc["stream_idx"]] = {
-                "dd_type": best_dd, "train_f1": best_f1,
+            cross_dd_selection[s_idx] = {
+                "dd_type": best_dd, "val_f1": best_f1,
             }
-            logger.info(f"  Stream {sc['stream_idx']}: best={best_dd} "
-                        f"(trainF1={best_f1:.4f})")
+            logger.info(f"  Stream {s_idx}: best={best_dd} "
+                        f"(valF1={best_f1:.4f})")
 
     cross_deploy = _deployment_worker(
         ("cross_dd", cross_dd_slots, train_configs, N_DEPLOY_TRIALS, SEED))
     logger.info(f"  Cross-DD deploy: trainF1={cross_deploy['best_train_f1']:.4f}")
 
-    # ---- Phase 5: Evaluate on held-out streams ----
-    logger.info("Phase 5: Evaluation on held-out streams")
+    # ---- Phase 5: Evaluate on test streams ----
+    logger.info("Phase 5: Evaluation on test streams")
 
     fold_result = {
         "fold": fold,
@@ -445,7 +454,7 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     for dd_type in DETECTORS:
         gen = generalists[dd_type]
         macro, micro, f1s, tp, fp, fn = _eval_on_streams(
-            eval_configs,
+            test_configs,
             lambda sc, s, _dt=dd_type, _bp=gen["best_params"]:
                 run_single_detector(_dt, _bp, sc, s),
             SEED)
@@ -462,11 +471,11 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
                  for sc in train_configs]
         p = dep["best_params"]
         macro, micro, f1s, tp, fp, fn = _eval_on_streams(
-            eval_configs,
+            test_configs,
             lambda sc, s, _slots=slots, _p=p:
                 run_ensemble_eval(_slots, sc, s,
                                   _p["det_criterion"], _p["ens_criterion"],
-                                  _p["decision_window"], _p["suppression"]),
+                                  _p["decision_window"]),
             SEED)
         fold_result["per_dd_ensembles"][dd_type] = {
             "macro_f1": macro, "micro_f1": micro,
@@ -478,11 +487,11 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
     # Cross-DD ensemble
     p = cross_deploy["best_params"]
     macro, micro, f1s, tp, fp, fn = _eval_on_streams(
-        eval_configs,
+        test_configs,
         lambda sc, s, _slots=cross_dd_slots, _p=p:
             run_ensemble_eval(_slots, sc, s,
                               _p["det_criterion"], _p["ens_criterion"],
-                              _p["decision_window"], _p["suppression"]),
+                              _p["decision_window"]),
         SEED)
     fold_result["cross_dd_ensemble"] = {
         "macro_f1": macro, "micro_f1": micro,
@@ -562,7 +571,7 @@ def main():
     global DRIFT_FREQS, STREAM_LENGTH, N_BUDGET, N_DEPLOY_TRIALS, N_FOLDS
     global EXPERT_TRIAL_TIMEOUT, GENERALIST_TRIAL_TIMEOUT, OUTPUT_DIR
     global M_STREAMS, GENERATORS_LIST, DRIFT_FREQS_LIST, TOLERANCES_LIST
-    global N_GENERALIST_TRIALS
+    global SUPPRESSIONS_LIST, N_GENERALIST_TRIALS
 
     ap = argparse.ArgumentParser(description="Ensemble vs Generalist Comparison")
     ap.add_argument("--n-folds", type=int, default=N_FOLDS)
@@ -594,10 +603,12 @@ def main():
     GENERATORS_LIST = []
     DRIFT_FREQS_LIST = []
     TOLERANCES_LIST = []
+    SUPPRESSIONS_LIST = []
     for freq in DRIFT_FREQS:
         GENERATORS_LIST.extend(["SineClusters", "WaveformDrift2"])
         DRIFT_FREQS_LIST.extend([freq, freq])
-        TOLERANCES_LIST.extend([100, 100])
+        TOLERANCES_LIST.extend([freq // 10, freq // 10])
+        SUPPRESSIONS_LIST.extend([freq // 2, freq // 2])
     N_GENERALIST_TRIALS = M_STREAMS * N_BUDGET + N_DEPLOY_TRIALS
 
     os.makedirs(args.output_dir, exist_ok=True)

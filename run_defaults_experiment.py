@@ -54,16 +54,15 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ============================================================
 
-DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD", "BNDM"]
+DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD"]
 
 DRIFT_FREQS = [200, 500, 1000]
 STREAM_LENGTH = 2000
 N_FOLDS = 3
-N_DEPLOY_TRIALS = 50
-N_CPUS = 4
+N_DEPLOY_TRIALS = 20
+N_CPUS = 8
 SEED = 1337
 BASE_STREAM_SEED = 42
-SUPPRESSION = 50
 OUTPUT_DIR = "results_defaults_experiment"
 GENERALIST_TRIAL_TIMEOUT = 600
 
@@ -72,10 +71,12 @@ M_STREAMS = len(DRIFT_FREQS) * 2  # 2 generators per freq
 GENERATORS_LIST: List[str] = []
 DRIFT_FREQS_LIST: List[int] = []
 TOLERANCES_LIST: List[int] = []
+SUPPRESSIONS_LIST: List[int] = []
 for freq in DRIFT_FREQS:
     GENERATORS_LIST.extend(["SineClusters", "WaveformDrift2"])
     DRIFT_FREQS_LIST.extend([freq, freq])
-    TOLERANCES_LIST.extend([100, 100])
+    TOLERANCES_LIST.extend([freq // 10, freq // 10])
+    SUPPRESSIONS_LIST.extend([freq // 2, freq // 2])
 
 
 # ============================================================
@@ -84,12 +85,6 @@ for freq in DRIFT_FREQS:
 # ============================================================
 
 GRID = {
-    "BNDM": {
-        "n_samples": [100, 250, 500, 1000],
-        "const": [0.5, 1.0, 2.0],
-        "max_depth": [2, 3, 5],
-        "threshold": [0.01, 0.05, 0.1],
-    },
     "CSDDM": {
         "n_samples": [100, 250, 500, 1000],
         "confidence": [0.1, 0.05, 0.01],
@@ -158,8 +153,8 @@ def _timeout_handler(signum, frame):
 # Stream helpers
 # ============================================================
 
-def get_stream_configs(fold: int, train: bool = True) -> List[dict]:
-    seed_offset = 0 if train else 10000
+def get_stream_configs(fold: int, split: str = "train") -> List[dict]:
+    seed_offset = {"train": 0, "val": 5000, "test": 10000}[split]
     return [
         {
             "generator": GENERATORS_LIST[i],
@@ -167,6 +162,7 @@ def get_stream_configs(fold: int, train: bool = True) -> List[dict]:
             "stream_length": STREAM_LENGTH,
             "stream_seed": BASE_STREAM_SEED + seed_offset + fold * 100 + i,
             "tolerance": TOLERANCES_LIST[i],
+            "suppression": SUPPRESSIONS_LIST[i],
             "stream_idx": i,
         }
         for i in range(M_STREAMS)
@@ -182,7 +178,7 @@ def _get_recent_size(params: dict) -> int:
 # Evaluation primitives
 # ============================================================
 
-def run_single_detector(kind, params, sc, seed, suppression=SUPPRESSION):
+def run_single_detector(kind, params, sc, seed, suppression=None):
     """Run a single detector on a stream."""
     stream = build_stream(sc["generator"], sc["drift_frequency"],
                           sc["stream_length"], sc["stream_seed"])
@@ -195,14 +191,15 @@ def run_single_detector(kind, params, sc, seed, suppression=SUPPRESSION):
         triggered = bool(det.update(x))
         if triggered:
             raw.append(i)
-    dets = apply_suppression(raw, suppression)
+    supp = suppression if suppression is not None else sc["suppression"]
+    dets = apply_suppression(raw, supp)
     tp, fp, fn, _ = evaluate_detections(dets, known, sc["tolerance"])
     return _f1_from_counts(tp, fp, fn), tp, fp, fn
 
 
 def run_ensemble_eval(slot_specs, sc, seed,
                       det_criterion="any", ens_criterion="any",
-                      decision_window=1, suppression=SUPPRESSION):
+                      decision_window=1, suppression=None):
     """Run an ensemble of detectors on a stream."""
     from collections import deque
     stream = build_stream(sc["generator"], sc["drift_frequency"],
@@ -239,7 +236,8 @@ def run_ensemble_eval(slot_specs, sc, seed,
             ens = ns >= (nd + 1) // 2
         if ens:
             raw.append(i)
-    dets = apply_suppression(raw, suppression)
+    supp = suppression if suppression is not None else sc["suppression"]
+    dets = apply_suppression(raw, supp)
     tp, fp, fn, _ = evaluate_detections(dets, known, sc["tolerance"])
     return _f1_from_counts(tp, fp, fn), tp, fp, fn
 
@@ -328,7 +326,6 @@ def _deployment_worker(args):
         det_crit = trial.suggest_categorical("det_criterion", ["any", "all", "majority"])
         ens_crit = trial.suggest_categorical("ens_criterion", ["any", "all", "majority"])
         dw = trial.suggest_int("decision_window", 1, 20)
-        supp = trial.suggest_int("suppression", 0, 200)
 
         signal.signal(signal.SIGALRM, _timeout_handler)
         signal.alarm(GENERALIST_TRIAL_TIMEOUT)
@@ -336,14 +333,16 @@ def _deployment_worker(args):
             f1s = []
             for i, sc in enumerate(stream_configs):
                 f1, _, _, _ = run_ensemble_eval(
-                    slot_specs, sc, seed, det_crit, ens_crit, dw, supp)
+                    slot_specs, sc, seed, det_crit, ens_crit, dw)
                 f1s.append(f1)
                 trial.report(sum(f1s) / len(f1s), i)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
             return sum(f1s) / len(f1s)
+        except optuna.TrialPruned:
+            raise
         except Exception:
-            return 0.0
+            raise optuna.TrialPruned()
         finally:
             signal.alarm(0)
 
@@ -368,8 +367,9 @@ def run_fold(fold: int, n_cpus: int) -> dict:
     logger.info(f"FOLD {fold}")
     logger.info(f"{'='*70}")
 
-    train_configs = get_stream_configs(fold, train=True)
-    eval_configs = get_stream_configs(fold, train=False)
+    train_configs = get_stream_configs(fold, "train")
+    val_configs = get_stream_configs(fold, "val")
+    test_configs = get_stream_configs(fold, "test")
 
     # ---- Phase 1: Grid search for best generalist per DD type ----
     logger.info("Phase 1: Grid search for best default-like generalist configs")
@@ -399,8 +399,8 @@ def run_fold(fold: int, n_cpus: int) -> dict:
     logger.info(f"  Cross-DD deploy: trainF1={cross_deploy['best_train_f1']:.4f} "
                 f"({time.time()-t0:.0f}s)")
 
-    # ---- Phase 3: Evaluate on held-out streams ----
-    logger.info("Phase 3: Evaluation on held-out streams")
+    # ---- Phase 3: Evaluate on test streams ----
+    logger.info("Phase 3: Evaluation on test streams")
 
     fold_result = {
         "fold": fold,
@@ -422,7 +422,7 @@ def run_fold(fold: int, n_cpus: int) -> dict:
     for dd_type in DETECTORS:
         params = generalists[dd_type]["params"]
         macro, micro, f1s, tp, fp, fn = _eval_on_streams(
-            eval_configs,
+            test_configs,
             lambda sc, s, _dt=dd_type, _bp=params:
                 run_single_detector(_dt, _bp, sc, s),
             SEED)
@@ -435,11 +435,11 @@ def run_fold(fold: int, n_cpus: int) -> dict:
     # Evaluate cross-DD ensemble
     p = cross_deploy["best_params"]
     macro, micro, f1s, tp, fp, fn = _eval_on_streams(
-        eval_configs,
+        test_configs,
         lambda sc, s, _slots=cross_dd_slots, _p=p:
             run_ensemble_eval(_slots, sc, s,
                               _p["det_criterion"], _p["ens_criterion"],
-                              _p["decision_window"], _p["suppression"]),
+                              _p["decision_window"]),
         SEED)
     fold_result["cross_dd_ensemble"] = {
         "macro_f1": macro, "micro_f1": micro,
@@ -505,6 +505,7 @@ def main():
     global DRIFT_FREQS, STREAM_LENGTH, N_FOLDS, N_DEPLOY_TRIALS
     global GENERALIST_TRIAL_TIMEOUT, OUTPUT_DIR
     global M_STREAMS, GENERATORS_LIST, DRIFT_FREQS_LIST, TOLERANCES_LIST
+    global SUPPRESSIONS_LIST
 
     ap = argparse.ArgumentParser(
         description="Default Configs: Generalist vs Cross-DD Ensemble")
@@ -532,10 +533,12 @@ def main():
     GENERATORS_LIST = []
     DRIFT_FREQS_LIST = []
     TOLERANCES_LIST = []
+    SUPPRESSIONS_LIST = []
     for freq in DRIFT_FREQS:
         GENERATORS_LIST.extend(["SineClusters", "WaveformDrift2"])
         DRIFT_FREQS_LIST.extend([freq, freq])
-        TOLERANCES_LIST.extend([100, 100])
+        TOLERANCES_LIST.extend([freq // 10, freq // 10])
+        SUPPRESSIONS_LIST.extend([freq // 2, freq // 2])
 
     # Log grid sizes
     total_configs = 0
