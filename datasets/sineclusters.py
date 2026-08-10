@@ -23,7 +23,7 @@ class SineClusters(datasets.base.SyntheticDataset):
         self.drift_frequency = drift_frequency
         self.stream_length = stream_length
         self.centroids = None
-        self.sine_period = 500
+        self.sine_period = 313
         self.indices = np.linspace(0, 2 * np.pi, self.sine_period + 1)
         self.seed = seed
         self.rng = None

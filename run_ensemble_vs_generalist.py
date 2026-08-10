@@ -56,12 +56,13 @@ DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD"]
 
 DRIFT_FREQS = [200, 500, 1000]
 STREAM_LENGTH = 2000
-N_BUDGET = 9
-N_BUDGET_MAX = 75
+N_BUDGET = 60
+N_BUDGET_MAX = 60
 N_BUDGET_STEP = 15
-ENSEMBLE_F1_THRESHOLD = 0.8
+ENSEMBLE_F1_THRESHOLD = 0.0  # disabled: fixed budget, no adaptive search
+EXPERT_MIN_VAL_F1 = 0.3
 N_FOLDS = 2
-N_DEPLOY_TRIALS = 10
+N_DEPLOY_TRIALS = 30
 N_CPUS = 8
 N_ENSEMBLE_K = 3
 SEED = 1337
@@ -133,10 +134,14 @@ def _f05_from_counts(tp: int, fp: int, fn: int) -> float:
     return (1.25 * precision * recall) / (0.25 * precision + recall)
 
 
-def run_single_detector(kind, params, sc, seed, suppression=None):
+def run_single_detector(kind, params, sc, seed, suppression=0):
     """Run a single detector on a stream.  Iterates the stream directly
     so that _TrialTimeout propagates correctly (run_ensemble in
-    main_synthetic swallows all exceptions)."""
+    main_synthetic swallows all exceptions).
+
+    suppression=0 means no suppression (raw detections).  Generalists
+    are evaluated without suppression; ensembles pass their optimised
+    suppression value."""
     stream = build_stream(sc["generator"], sc["drift_frequency"],
                           sc["stream_length"], sc["stream_seed"])
     known = list(stream.drifts)
@@ -148,17 +153,20 @@ def run_single_detector(kind, params, sc, seed, suppression=None):
         triggered = bool(det.update(x))
         if triggered:
             raw.append(i)
-    supp = suppression if suppression is not None else sc["suppression"]
-    dets = apply_suppression(raw, supp)
+    dets = apply_suppression(raw, suppression) if suppression > 0 else raw
     tp, fp, fn, _ = evaluate_detections(dets, known, sc["tolerance"])
     return _f1_from_counts(tp, fp, fn), tp, fp, fn
 
 
 def run_ensemble_eval(slot_specs, sc, seed,
                       det_criterion="any", ens_criterion="any",
-                      decision_window=1, suppression=None):
+                      decision_window=1, suppression=0):
     """Run an ensemble of detectors on a stream.  Iterates the stream
-    directly so that _TrialTimeout propagates correctly."""
+    directly so that _TrialTimeout propagates correctly.
+
+    suppression is an optimised ensemble hyperparameter (0 = no
+    suppression, otherwise the minimum gap between consecutive
+    detections)."""
     from collections import deque
     stream = build_stream(sc["generator"], sc["drift_frequency"],
                           sc["stream_length"], sc["stream_seed"])
@@ -194,8 +202,7 @@ def run_ensemble_eval(slot_specs, sc, seed,
             ens = ns >= (nd + 1) // 2
         if ens:
             raw.append(i)
-    supp = suppression if suppression is not None else sc["suppression"]
-    dets = apply_suppression(raw, supp)
+    dets = apply_suppression(raw, suppression) if suppression > 0 else raw
     tp, fp, fn, _ = evaluate_detections(dets, known, sc["tolerance"])
     return _f1_from_counts(tp, fp, fn), tp, fp, fn
 
@@ -213,10 +220,42 @@ def _eval_on_streams(eval_configs, eval_fn, seed):
     return macro, micro, f1s, tp_t, fp_t, fn_t
 
 
+def _avail_mem_mb():
+    """Return available memory in MB (Linux /proc/meminfo or psutil)."""
+    try:
+        import psutil
+        return psutil.virtual_memory().available // (1024 * 1024)
+    except ImportError:
+        pass
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except (OSError, IndexError, ValueError):
+        pass
+    return None
+
+
+def _clamp_workers(n_cpus, per_worker_mb=800, min_workers=2):
+    """Reduce n_cpus if available memory is insufficient.
+    Each worker process needs ~per_worker_mb MB (numpy, optuna, sklearn, etc.)."""
+    avail_mb = _avail_mem_mb()
+    if avail_mb is None:
+        return n_cpus
+    max_by_mem = max(min_workers, avail_mb // per_worker_mb)
+    if max_by_mem < n_cpus:
+        logger.info(f"  Reducing workers from {n_cpus} to {max_by_mem} "
+                    f"(avail mem {avail_mb}MB, ~{per_worker_mb}MB/worker)")
+        return max_by_mem
+    return n_cpus
+
+
 def _run_pool(worker_fn, tasks, n_cpus, max_retries=3):
     """Run tasks in a ProcessPoolExecutor with retry on BrokenProcessPool.
     Each worker handles one task then gets recycled (max_tasks_per_child=1)
     to prevent memory leaks and segfault accumulation."""
+    n_cpus = _clamp_workers(n_cpus)
     results = []
     pending = list(tasks)
     for attempt in range(max_retries + 1):
@@ -237,9 +276,7 @@ def _run_pool(worker_fn, tasks, n_cpus, max_retries=3):
                         pending.append(task)
         except BrokenProcessPool as e:
             logger.warning(f"  Pool broke (attempt {attempt+1}): {e}")
-            # pending already contains only uncompleted tasks
             if not pending:
-                # All futures were submitted but pool died before completion
                 pending = [futs[f] for f in futs if not f.done()]
         if pending and attempt < max_retries:
             logger.info(f"  Retrying {len(pending)} failed tasks...")
@@ -327,6 +364,9 @@ def _deployment_worker(args):
         det_crit = trial.suggest_categorical("det_criterion", ["any", "all", "majority"])
         ens_crit = trial.suggest_categorical("ens_criterion", ["any", "all", "majority"])
         dw = trial.suggest_int("decision_window", 1, 20)
+        # Suppression: ensemble-only hyperparameter, capped at freq/2 per stream
+        max_supp = max(sc["suppression"] for sc in stream_configs)
+        supp = trial.suggest_int("suppression", 0, max_supp)
 
         signal.signal(signal.SIGALRM, _timeout_handler)
         signal.alarm(GENERALIST_TRIAL_TIMEOUT)
@@ -335,7 +375,7 @@ def _deployment_worker(args):
             for i, sc in enumerate(stream_configs):
                 slots = per_stream_slots[sc["stream_idx"]]
                 f1, _, _, _ = run_ensemble_eval(
-                    slots, sc, seed, det_crit, ens_crit, dw)
+                    slots, sc, seed, det_crit, ens_crit, dw, supp)
                 f1s.append(f1)
                 trial.report(sum(f1s) / len(f1s), i)
                 if trial.should_prune():
@@ -367,7 +407,8 @@ def _deployment_worker(args):
             slots = per_stream_slots[sc["stream_idx"]]
             f1, _, _, _ = run_ensemble_eval(
                 slots, sc, seed,
-                p["det_criterion"], p["ens_criterion"], p["decision_window"])
+                p["det_criterion"], p["ens_criterion"],
+                p["decision_window"], p["suppression"])
             val_f1s.append(f1)
         val_f1 = sum(val_f1s) / len(val_f1s) if val_f1s else 0.0
         if val_f1 > best_val_f1:
@@ -464,18 +505,29 @@ def _run_ensemble_pipeline(fold, n_budget, n_cpus, train_configs, val_configs, t
     logger.info("Phase 4: Ensemble evaluation on test streams")
 
     per_dd_ensembles = {}
+    good_dd_types = []
     for dd_type in DETECTORS:
         dep = per_dd_deploy[dd_type]
+        if dep["best_val_f1"] < EXPERT_MIN_VAL_F1:
+            logger.info(f"  Ens-{dd_type} skipped: valF1={dep['best_val_f1']:.4f} < {EXPERT_MIN_VAL_F1}")
+            per_dd_ensembles[dd_type] = {
+                "macro_f1": 0.0, "micro_f1": 0.0,
+                "per_stream_f1": [], "tp": 0, "fp": 0, "fn": 0,
+                "deployment_params": dep["best_params"],
+                "filtered": True,
+            }
+            continue
+        good_dd_types.append(dd_type)
         p = dep["best_params"]
         macro, micro, f1s, tp, fp, fn = _eval_on_streams(
             test_configs,
             lambda sc, s, _dt=dd_type, _p=p:
                 run_ensemble_eval(
-                    [(dd_type, experts[(dd_type, sc["stream_idx"], k)]["best_params"])
+                    [(_dt, experts[(_dt, sc["stream_idx"], k)]["best_params"])
                      for k in range(N_ENSEMBLE_K)],
                     sc, s,
                     _p["det_criterion"], _p["ens_criterion"],
-                    _p["decision_window"]),
+                    _p["decision_window"], _p["suppression"]),
             SEED)
         per_dd_ensembles[dd_type] = {
             "macro_f1": macro, "micro_f1": micro,
@@ -492,7 +544,7 @@ def _run_ensemble_pipeline(fold, n_budget, n_cpus, train_configs, val_configs, t
             run_ensemble_eval(
                 _slots_map[sc["stream_idx"]], sc, s,
                 _p["det_criterion"], _p["ens_criterion"],
-                _p["decision_window"]),
+                _p["decision_window"], _p["suppression"]),
         SEED)
     cross_dd_ensemble = {
         "macro_f1": macro, "micro_f1": micro,
@@ -502,13 +554,16 @@ def _run_ensemble_pipeline(fold, n_budget, n_cpus, train_configs, val_configs, t
     }
     logger.info(f"  Cross-DD ensemble eval: macroF1={macro:.4f}")
 
-    avg_ens_f1 = np.mean([per_dd_ensembles[dd]["macro_f1"] for dd in DETECTORS])
-    logger.info(f"  Avg per-DD ensemble macroF1={avg_ens_f1:.4f}")
+    avg_ens_f1 = cross_dd_ensemble["macro_f1"]
+    n_good = len(good_dd_types)
+    logger.info(f"  Cross-DD ensemble macroF1={avg_ens_f1:.4f} "
+                f"({n_good}/{len(DETECTORS)} DD types passed val filter)")
 
     partial = {
         "experts": {f"{k[0]}_{k[1]}_{k[2]}": v for k, v in experts.items()},
         "per_dd_ensembles": per_dd_ensembles,
         "cross_dd_ensemble": cross_dd_ensemble,
+        "good_dd_types": good_dd_types,
         "n_budget_used": n_budget,
     }
     return partial, avg_ens_f1
@@ -539,16 +594,16 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
             best_partial = partial
 
         if avg_f1 >= ENSEMBLE_F1_THRESHOLD:
-            logger.info(f"  Ensemble avg F1={avg_f1:.4f} >= {ENSEMBLE_F1_THRESHOLD} "
+            logger.info(f"  Cross-DD F1={avg_f1:.4f} >= {ENSEMBLE_F1_THRESHOLD} "
                         f"— threshold met, proceeding to generalist training")
             break
         elif current_budget >= N_BUDGET_MAX:
-            logger.info(f"  Ensemble avg F1={avg_f1:.4f} < {ENSEMBLE_F1_THRESHOLD} "
+            logger.info(f"  Cross-DD F1={avg_f1:.4f} < {ENSEMBLE_F1_THRESHOLD} "
                         f"but max budget {N_BUDGET_MAX} reached — proceeding with best so far")
             break
         else:
             next_budget = min(current_budget + N_BUDGET_STEP, N_BUDGET_MAX)
-            logger.info(f"  Ensemble avg F1={avg_f1:.4f} < {ENSEMBLE_F1_THRESHOLD} "
+            logger.info(f"  Cross-DD F1={avg_f1:.4f} < {ENSEMBLE_F1_THRESHOLD} "
                         f"— increasing budget from {current_budget} to {next_budget}")
             current_budget = next_budget
 
@@ -666,7 +721,7 @@ def main():
     global EXPERT_TRIAL_TIMEOUT, GENERALIST_TRIAL_TIMEOUT, OUTPUT_DIR
     global M_STREAMS, GENERATORS_LIST, DRIFT_FREQS_LIST, TOLERANCES_LIST
     global SUPPRESSIONS_LIST, N_GENERALIST_TRIALS
-    global N_BUDGET_MAX, N_BUDGET_STEP, ENSEMBLE_F1_THRESHOLD
+    global N_BUDGET_MAX, N_BUDGET_STEP, ENSEMBLE_F1_THRESHOLD, EXPERT_MIN_VAL_F1
 
     ap = argparse.ArgumentParser(description="Ensemble vs Generalist Comparison")
     ap.add_argument("--n-folds", type=int, default=N_FOLDS)
@@ -684,7 +739,9 @@ def main():
     ap.add_argument("--n-budget-step", type=int, default=N_BUDGET_STEP,
                     help="Budget increment for adaptive search")
     ap.add_argument("--ensemble-f1-threshold", type=float, default=ENSEMBLE_F1_THRESHOLD,
-                    help="Avg ensemble F1 threshold to stop budget search")
+                    help="Cross-DD ensemble F1 threshold to stop budget search")
+    ap.add_argument("--expert-min-val-f1", type=float, default=EXPERT_MIN_VAL_F1,
+                    help="Min val F1 for a DD type to be included in per-DD ensembles")
     args = ap.parse_args()
 
     if args.drift_freqs:
@@ -702,6 +759,7 @@ def main():
     N_BUDGET_MAX = args.n_budget_max
     N_BUDGET_STEP = args.n_budget_step
     ENSEMBLE_F1_THRESHOLD = args.ensemble_f1_threshold
+    EXPERT_MIN_VAL_F1 = args.expert_min_val_f1
 
     M_STREAMS = len(DRIFT_FREQS) * 2
     GENERATORS_LIST = []
