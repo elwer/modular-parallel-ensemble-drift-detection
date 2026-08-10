@@ -59,6 +59,13 @@ Wraps `optimization/single_dd_optimize_optuna.py` and
 across all supported datasets. By default, all datasets are optimized;
 a subset can be selected via `--datasets`.
 
+**Note:** Only the Electricity dataset is available by default. Additional
+datasets (GasSensor, PokerHand, RialtoBridgeTimelapse, etc.) must be
+downloaded manually from the
+[USP DS repository](https://github.com/EliasWang49/usp_ds) and placed in
+`datasets/files/`. The corresponding dataset classes must also be
+uncommented in `datasets/__init__.py`.
+
 ### 3. Trace Data
 
 **Directory:** `trace_data/trace_dscal/`
