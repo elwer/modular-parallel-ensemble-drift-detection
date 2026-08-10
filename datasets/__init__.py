@@ -1,3 +1,4 @@
+from .electricity import Electricity
 from .sineclusters_pre import SineClustersPre
 from .waveform_pre import WaveformPre
 from .sineclusters import SineClusters
@@ -20,6 +21,7 @@ __all__ = [
     "WaveformPre",
     "SineClusters",
     "WaveformDrift2",
+    "Electricity",
     #"GasSensor",
     #"HeartBeats",
     #"InsectsAbruptBalanced",
