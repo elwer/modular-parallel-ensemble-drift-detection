@@ -93,6 +93,4 @@ parallelism of the ensemble pipeline.
 
 ## Further Studies
 
-The `further_studies/` directory contains additional experiment scripts,
-benchmarks, scalability studies, notebooks, and supporting files for further
-experimentation. See `further_studies/README.md` for details.
+Will be added in future
