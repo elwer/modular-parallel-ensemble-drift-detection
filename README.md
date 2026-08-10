@@ -68,7 +68,7 @@ uncommented in `datasets/__init__.py`.
 
 ### 3. Trace Data
 
-**Directory:** `trace_data/trace_dscal/`
+**Directory:** `trace_data.zip`
 
 Contains OTF2 trace data from an instrumented DD run, collected with Score-P.
 The traces can be visualized with Vampir to analyze the runtime behaviour and
