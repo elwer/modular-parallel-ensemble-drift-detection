@@ -49,13 +49,15 @@ Results are stored in JSON format in the specified output directory.
 
 ### 2. Real-World Optuna Study
 
+Per-dataset hyperparameter optimization of both single DDs and the
+MoPEDDS ensemble on real-world datasets, using Optuna with a TPE sampler.
+
 **Script:** `run_cross_dataset_evaluation.py`
 
-Evaluates ML model-based pipelines equipped with MoPEDDS against single-DD
-pipelines on several real-world datasets. Uses Optuna for hyperparameter
-optimization of both the detectors and the ensemble deployment parameters.
-
-**Visualization:** `plot_cross_dataset_evaluation.ipynb`
+Wraps `optimization/single_dd_optimize_optuna.py` and
+`optimization/mopedds_optimize_optuna.py`, running per-dataset optimization
+across all supported datasets. By default, all datasets are optimized;
+a subset can be selected via `--datasets`.
 
 ### 3. Trace Data
 
@@ -70,19 +72,20 @@ parallelism of the ensemble pipeline.
 ```
 .
 ├── run_ensemble_vs_generalist.py    # Synthetic ablation study
-├── run_cross_dataset_evaluation.py  # Real-world Optuna study
-├── plot_cross_dataset_evaluation.ipynb
+├── run_cross_dataset_evaluation.py  # Real-world Optuna study (wrapper)
 ├── ensemble_vs_generalist.sbatch    # SLURM script for ablation study
 ├── submit_ensemble_vs_generalist.sh # Submit script for ablation study
+├── optimization/                    # Optuna optimization scripts
+│   ├── single_dd_optimize_optuna.py   # Single-DD optimization per dataset
+│   └── mopedds_optimize_optuna.py     # MoPEDDS ensemble optimization per dataset
+├── main.py                          # ML pipeline runner
 ├── trace_data/                      # OTF2 traces for Vampir
 ├── detectors/                       # Detector implementations
 ├── model/                           # ML model pipeline components
 ├── metrics/                         # Evaluation metrics
 ├── datasets/                        # Dataset loaders
-├── optimization/                    # Optuna optimization utilities
 ├── split_pipeline/                  # Pipeline splitting utilities
 ├── test/                            # Unit tests
-├── main.py                          # Main entry point
 ├── main_synthetic.py                # Synthetic stream utilities
 ├── setup.sh                         # HPC environment setup
 ├── requirements.txt                 # Python dependencies
