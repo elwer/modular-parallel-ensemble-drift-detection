@@ -10,6 +10,7 @@ Design goals:
 
 import threading
 import logging
+import time
 from collections import deque
 from typing import List, Optional
 
@@ -47,10 +48,11 @@ class DetectorWorker(threading.Thread):
     Maintains local decision history and computes level 1 decisions.
     """
     __slots__ = ['detector_idx', 'detector', 'slot', 'running', 'last_processed_id',
-                 'deployment', 'name', 'decision_history', 'drift_count']
+                 'deployment', 'name', 'decision_history', 'drift_count',
+                 'track_stats', 'work_time', 'total_time']
     
     def __init__(self, detector_idx: int, detector: UnsupervisedDriftDetector,
-                 slot: WorkerSlot, deployment):
+                 slot: WorkerSlot, deployment, track_stats: bool = False):
         super().__init__(daemon=True)
         self.detector_idx = detector_idx
         self.detector = detector
@@ -61,6 +63,9 @@ class DetectorWorker(threading.Thread):
         self.name = f"Worker-{detector_idx}-{detector.__class__.__name__}"
         self.decision_history: deque = deque(maxlen=slot.decision_window)
         self.drift_count: int = 0  # Running count of True values in history
+        self.track_stats = track_stats
+        self.work_time: float = 0.0
+        self.total_time: float = 0.0
     
     def _add_to_history(self, result: bool) -> None:
         """Add result to history and update drift_count incrementally."""
@@ -101,6 +106,7 @@ class DetectorWorker(threading.Thread):
             detector = self.detector
             deployment = self.deployment
             last_id = 0
+            run_start = time.perf_counter() if self.track_stats else 0.0
 
             while self.running:
                 # Check if we need to clear history (after drift detection)
@@ -115,10 +121,14 @@ class DetectorWorker(threading.Thread):
 
                 # Process the sample
                 data = slot.data
+                if self.track_stats:
+                    _t0 = time.perf_counter()
                 try:
                     raw_result = detector.update(data)
                 except Exception:
                     raw_result = False
+                if self.track_stats:
+                    self.work_time += time.perf_counter() - _t0
 
                 # Debug: print raw DD result when drift detected
                 if raw_result and self.deployment.verbose:
@@ -133,9 +143,23 @@ class DetectorWorker(threading.Thread):
                 slot.result_ready = True
 
                 last_id = current_id
+
+            if self.track_stats:
+                self.total_time = time.perf_counter() - run_start
     
     def stop(self):
         self.running = False
+
+    def get_stats(self) -> dict:
+        busy_wait = self.total_time - self.work_time
+        return {
+            "worker_idx": self.detector_idx,
+            "worker_name": self.name,
+            "work_time": self.work_time,
+            "total_time": self.total_time,
+            "busy_wait_time": busy_wait,
+            "work_ratio": self.work_time / self.total_time if self.total_time > 0 else 0.0,
+        }
 
 
 class ThreadsDeployment:
@@ -154,12 +178,14 @@ class ThreadsDeployment:
                  verbose: bool = False,
                  mopedds=None,
                  detector_decision_criteria: str = "majority",
-                 decision_window: int = 10):
+                 decision_window: int = 10,
+                 track_stats: bool = False):
         self.detectors = detectors
         self.verbose = verbose
         self.mopedds = mopedds  # Reference to MOPEDDS for suppression flag
         self.detector_decision_criteria = detector_decision_criteria
         self.decision_window = decision_window
+        self.track_stats = track_stats
         
         # Worker slots and threads
         self.slots: List[WorkerSlot] = []
@@ -188,7 +214,8 @@ class ThreadsDeployment:
         self.workers = []
         
         for idx, detector in enumerate(self.detectors):
-            worker = DetectorWorker(idx, detector, self.slots[idx], self)
+            worker = DetectorWorker(idx, detector, self.slots[idx], self,
+                                    track_stats=self.track_stats)
             worker.start()
             self.workers.append(worker)
         
@@ -255,4 +282,9 @@ class ThreadsDeployment:
                     pending.remove(idx)
         
         return results
+
+    def get_worker_stats(self) -> List[dict]:
+        if not self.track_stats:
+            return []
+        return [w.get_stats() for w in self.workers]
 

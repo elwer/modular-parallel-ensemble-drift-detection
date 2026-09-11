@@ -657,51 +657,116 @@ def run_fold(fold: int, n_budget: int, n_cpus: int) -> dict:
 # Comparison table
 # ============================================================
 
+def _pooled_metrics(all_results, key, dd_type=None, fail_threshold=0.3):
+    """Pool per-stream F1, TP, FP, FN across all folds.
+
+    Returns (macro_f1, macro_std, micro_f1, min_f1, fail_rate, n_streams).
+    Macro F1 is mean +/- std (ddof=1) over all per-stream F1 values.
+    Micro F1 is a single aggregate from pooled TP/FP/FN.
+    Min F1 is the minimum per-stream F1.
+    Fail Rate is the fraction of streams with F1 < fail_threshold.
+    """
+    f1s, tps, fps, fns = [], 0, 0, 0
+    for r in all_results:
+        entry = r[key][dd_type] if dd_type else r[key]
+        if entry.get("filtered", False):
+            continue
+        psf = entry.get("per_stream_f1", [])
+        if not psf:
+            continue
+        f1s.extend(psf)
+        tps += entry["tp"]
+        fps += entry["fp"]
+        fns += entry["fn"]
+    if not f1s:
+        return 0.0, 0.0, 0.0, 0.0, 1.0, 0
+    macro = np.mean(f1s)
+    macro_std = np.std(f1s, ddof=1) if len(f1s) > 1 else 0.0
+    micro = _f1_from_counts(tps, fps, fns)
+    min_f1 = min(f1s)
+    fail_rate = sum(1 for x in f1s if x < fail_threshold) / len(f1s)
+    return macro, macro_std, micro, min_f1, fail_rate, len(f1s)
+
+
 def print_comparison_table(all_results: list):
     n = len(all_results)
-    print(f"\n{'='*80}")
-    print(f"FINAL COMPARISON  (mean +/- std across {n} folds)")
-    print(f"{'='*80}")
-    print(f"{'Approach':<35} {'Macro F1':>15} {'Micro F1':>15}")
-    print(f"{'-'*35} {'-'*15} {'-'*15}")
+    n_streams = len(all_results[0]["generalists_eval"][DETECTORS[0]]["per_stream_f1"])
+    total = n_streams * n
+    print(f"\n{'='*90}")
+    print(f"FINAL COMPARISON  (Macro F1: mean +/- std over {total} per-stream evaluations; "
+          f"Micro/Min/Fail: aggregate)")
+    print(f"{'='*90}")
+    print(f"{'Approach':<35} {'Macro F1':>15} {'Micro F1':>10} {'Min F1':>8} {'Fail Rate':>10}")
+    print(f"{'-'*35} {'-'*15} {'-'*10} {'-'*8} {'-'*10}")
 
     # Generalists
     for dd in DETECTORS:
-        vals = [r["generalists_eval"][dd]["macro_f1"] for r in all_results]
-        mvals = [r["generalists_eval"][dd]["micro_f1"] for r in all_results]
-        print(f"  Gen-{dd:<29} {np.mean(vals):.4f}+/-{np.std(vals):.4f}"
-              f"  {np.mean(mvals):.4f}+/-{np.std(mvals):.4f}")
+        m, s, mi, mn, fr, _ = _pooled_metrics(all_results, "generalists_eval", dd)
+        print(f"  Gen-{dd:<29} {m:.4f}+/-{s:.4f}  {mi:.4f}    {mn:.4f}    {fr:.4f}")
 
     # Per-DD ensembles
     for dd in DETECTORS:
-        vals = [r["per_dd_ensembles"][dd]["macro_f1"] for r in all_results]
-        mvals = [r["per_dd_ensembles"][dd]["micro_f1"] for r in all_results]
-        print(f"  Ens-{dd:<29} {np.mean(vals):.4f}+/-{np.std(vals):.4f}"
-              f"  {np.mean(mvals):.4f}+/-{np.std(mvals):.4f}")
+        m, s, mi, mn, fr, _ = _pooled_metrics(all_results, "per_dd_ensembles", dd)
+        print(f"  Ens-{dd:<29} {m:.4f}+/-{s:.4f}  {mi:.4f}    {mn:.4f}    {fr:.4f}")
 
     # Cross-DD
-    vals = [r["cross_dd_ensemble"]["macro_f1"] for r in all_results]
-    mvals = [r["cross_dd_ensemble"]["micro_f1"] for r in all_results]
-    print(f"  {'Cross-DD ensemble':<33} {np.mean(vals):.4f}+/-{np.std(vals):.4f}"
-          f"  {np.mean(mvals):.4f}+/-{np.std(mvals):.4f}")
+    m, s, mi, mn, fr, _ = _pooled_metrics(all_results, "cross_dd_ensemble")
+    print(f"  {'Cross-DD ensemble':<33} {m:.4f}+/-{s:.4f}  {mi:.4f}    {mn:.4f}    {fr:.4f}")
 
-    # Averages
-    gen_avg = [np.mean([r["generalists_eval"][dd]["macro_f1"] for dd in DETECTORS])
-               for r in all_results]
-    ens_avg = [np.mean([r["per_dd_ensembles"][dd]["macro_f1"] for dd in DETECTORS])
-               for r in all_results]
-    cross_vals = [r["cross_dd_ensemble"]["macro_f1"] for r in all_results]
+    # Averages: pool across all DD types
+    gen_f1s, gen_tp, gen_fp, gen_fn = [], 0, 0, 0
+    for dd in DETECTORS:
+        f1s, tps, fps, fns = [], 0, 0, 0
+        for r in all_results:
+            entry = r["generalists_eval"][dd]
+            f1s.extend(entry["per_stream_f1"])
+            tps += entry["tp"]
+            fps += entry["fp"]
+            fns += entry["fn"]
+        gen_f1s.extend(f1s)
+        gen_tp += tps
+        gen_fp += fps
+        gen_fn += fns
+
+    ens_f1s, ens_tp, ens_fp, ens_fn = [], 0, 0, 0
+    for dd in DETECTORS:
+        for r in all_results:
+            entry = r["per_dd_ensembles"][dd]
+            if entry.get("filtered", False):
+                continue
+            psf = entry.get("per_stream_f1", [])
+            if not psf:
+                continue
+            ens_f1s.extend(psf)
+            ens_tp += entry["tp"]
+            ens_fp += entry["fp"]
+            ens_fn += entry["fn"]
+
+    cross_f1s = []
+    cross_tp, cross_fp, cross_fn = 0, 0, 0
+    for r in all_results:
+        entry = r["cross_dd_ensemble"]
+        cross_f1s.extend(entry["per_stream_f1"])
+        cross_tp += entry["tp"]
+        cross_fp += entry["fp"]
+        cross_fn += entry["fn"]
 
     print(f"\n  {'--- Averages ---':^65}")
-    print(f"  {'Avg generalist':<33} {np.mean(gen_avg):.4f}+/-{np.std(gen_avg):.4f}")
-    print(f"  {'Avg per-DD ensemble':<33} {np.mean(ens_avg):.4f}+/-{np.std(ens_avg):.4f}")
-    print(f"  {'Cross-DD ensemble':<33} {np.mean(cross_vals):.4f}+/-{np.std(cross_vals):.4f}")
+    print(f"  {'Avg generalist':<33} {np.mean(gen_f1s):.4f}+/-{np.std(gen_f1s, ddof=1):.4f}  "
+          f"{_f1_from_counts(gen_tp, gen_fp, gen_fn):.4f}    {min(gen_f1s):.4f}    "
+          f"{sum(1 for x in gen_f1s if x < 0.3)/len(gen_f1s):.4f}")
+    print(f"  {'Avg per-DD ensemble':<33} {np.mean(ens_f1s):.4f}+/-{np.std(ens_f1s, ddof=1):.4f}  "
+          f"{_f1_from_counts(ens_tp, ens_fp, ens_fn):.4f}    {min(ens_f1s):.4f}    "
+          f"{sum(1 for x in ens_f1s if x < 0.3)/len(ens_f1s):.4f}")
+    print(f"  {'Cross-DD ensemble':<33} {np.mean(cross_f1s):.4f}+/-{np.std(cross_f1s, ddof=1):.4f}  "
+          f"{_f1_from_counts(cross_tp, cross_fp, cross_fn):.4f}    {min(cross_f1s):.4f}    "
+          f"{sum(1 for x in cross_f1s if x < 0.3)/len(cross_f1s):.4f}")
 
     best_gen = max(np.mean([r["generalists_eval"][dd]["macro_f1"] for r in all_results])
                    for dd in DETECTORS)
     best_ens = max(np.mean([r["per_dd_ensembles"][dd]["macro_f1"] for r in all_results])
                    for dd in DETECTORS)
-    cross = np.mean(cross_vals)
+    cross = np.mean([r["cross_dd_ensemble"]["macro_f1"] for r in all_results])
 
     print(f"\n  Best generalist:       {best_gen:.4f}")
     print(f"  Best per-DD ensemble:  {best_ens:.4f}")
