@@ -26,7 +26,6 @@ from typing import Dict, List, Callable
 from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-#sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from optimization.synthetic_f1_multistream_optimize_optuna import build_stream
 from detectors.mopedds.threads_deployment import ThreadsDeployment
@@ -312,7 +311,8 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
 
 def main():
     ap = argparse.ArgumentParser(description="Scalability study: ThreadsDeployment with increasing ensemble sizes")
-    ap.add_argument("--stream-length", type=int, default=200)
+    ap.add_argument("--stream-length", type=int, default=50000,
+                    help="Number of samples per stream (keep large enough for external monitors)")
     ap.add_argument("--drift-frequency", type=int, default=100)
     ap.add_argument("--n-repeats", type=int, default=3,
                     help="Number of repeats per ensemble size (for variance)")
@@ -326,6 +326,10 @@ def main():
                          "unbalanced (1 slow DD + K-1 fast DDs)")
     ap.add_argument("--track-stats", action="store_true",
                     help="Track per-worker work vs busy-wait time and main-thread wait time")
+    ap.add_argument("--use-jumper", action="store_true",
+                    help="Enable JUmPER performance monitoring for each ensemble run")
+    ap.add_argument("--jumper-sampling-interval", type=float, default=2.0,
+                    help="JUmPER sampling interval in seconds (default 2.0)")
     args = ap.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -375,14 +379,43 @@ def main():
         for rep in range(args.n_repeats):
             seed = args.seed + rep * 1000
             logger.info(f"  Rep {rep+1}/{args.n_repeats} (seed={seed})")
-            result = run_scalability_benchmark(
-                n_detectors=size,
-                stream_length=args.stream_length,
-                drift_frequency=args.drift_frequency,
-                seed=seed,
-                scenario=args.scenario,
-                track_stats=args.track_stats,
-            )
+
+            jumper_service = None
+            if args.use_jumper:
+                from jumper_extension.core.service import build_perfmonitor_service
+                jumper_service = build_perfmonitor_service()
+                jumper_service.start_monitoring(args.jumper_sampling_interval)
+                jumper_result_file = os.path.join(
+                    args.output_dir,
+                    f"jumper_{args.scenario}_K{size}_rep{rep}.csv")
+
+            try:
+                if jumper_service is not None:
+                    with jumper_service.monitored():
+                        result = run_scalability_benchmark(
+                            n_detectors=size,
+                            stream_length=args.stream_length,
+                            drift_frequency=args.drift_frequency,
+                            seed=seed,
+                            scenario=args.scenario,
+                            track_stats=args.track_stats,
+                        )
+                else:
+                    result = run_scalability_benchmark(
+                        n_detectors=size,
+                        stream_length=args.stream_length,
+                        drift_frequency=args.drift_frequency,
+                        seed=seed,
+                        scenario=args.scenario,
+                        track_stats=args.track_stats,
+                    )
+            finally:
+                if jumper_service is not None:
+                    jumper_service.export_perfdata(file=jumper_result_file, level="slurm")
+                    jumper_service.stop_monitoring()
+                    result["jumper_file"] = jumper_result_file
+                    logger.info(f"  JUmPER data: {jumper_result_file}")
+
             result["rep"] = rep
             result["seed"] = seed
             result["mode"] = "ensemble"

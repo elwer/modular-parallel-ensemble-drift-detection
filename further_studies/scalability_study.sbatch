@@ -24,11 +24,12 @@ mkdir -p "${OUTPUT_DIR}"
 LOG="${OUTPUT_DIR}/scalability.log"
 
 python -u further_studies/run_scalability_study.py \
-    --stream-length 200 \
+    --stream-length 2000 \
     --drift-frequency 100 \
-    --n-repeats 5 \
+    --n-repeats 3 \
     --seed 42 \
     --scenario balanced \
     --track-stats \
+    --use-jumper \
     --output-dir "${OUTPUT_DIR}" \
     2>&1 | tee "${LOG}"
