@@ -129,6 +129,7 @@ class DetectorWorker(threading.Thread):
                 # Spin until new sample arrives
                 current_id = slot.sample_id
                 if current_id <= last_id:
+                    os.sched_yield()
                     continue
 
                 # Process the sample
@@ -305,10 +306,14 @@ class ThreadsDeployment:
         # Spin until all results ready
         pending = set(range(num_workers))
         while pending:
+            got_any = False
             for idx in list(pending):
                 if self.slots[idx].result_ready:
                     results[idx] = self.slots[idx].result
                     pending.remove(idx)
+                    got_any = True
+            if not got_any:
+                os.sched_yield()
         
         return results
 

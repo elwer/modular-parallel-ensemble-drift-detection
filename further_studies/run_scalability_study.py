@@ -322,9 +322,13 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
     # Wait for all workers to process first sample
     pending = set(range(len(deployment.slots)))
     while pending:
+        got_any = False
         for idx in list(pending):
             if deployment.slots[idx].result_ready:
                 pending.remove(idx)
+                got_any = True
+        if not got_any:
+            os.sched_yield()
 
     # Timed run
     t0 = time.perf_counter()
@@ -343,10 +347,14 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
         results = [False] * len(deployment.slots)
         _wait_t0 = time.perf_counter() if track_stats else 0.0
         while pending:
+            got_any = False
             for idx in list(pending):
                 if deployment.slots[idx].result_ready:
                     results[idx] = deployment.slots[idx].result
                     pending.remove(idx)
+                    got_any = True
+            if not got_any:
+                os.sched_yield()
         if track_stats:
             main_wait_time += time.perf_counter() - _wait_t0
         # Majority vote
