@@ -25,7 +25,8 @@ import argparse
 from typing import Dict, List, Callable
 from collections import deque
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+#sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from optimization.synthetic_f1_multistream_optimize_optuna import build_stream
 from detectors.mopedds.threads_deployment import ThreadsDeployment

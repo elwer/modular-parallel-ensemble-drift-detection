@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=128
 #SBATCH --time=00:30:00
-#SBATCH --mem-per-cpu=4096
+#SBATCH --mem-per-cpu=1024
 
 set -euo pipefail
 
@@ -23,12 +23,12 @@ OUTPUT_DIR="${OUTPUT_DIR:-results_scalability_hpc}"
 mkdir -p "${OUTPUT_DIR}"
 LOG="${OUTPUT_DIR}/scalability.log"
 
-python -u run_scalability_study.py \
+python -u further_studies/run_scalability_study.py \
     --stream-length 200 \
     --drift-frequency 100 \
     --n-repeats 5 \
     --seed 42 \
-    --scenario "${SCENARIO:-random}" \
+    --scenario balanced \
     --track-stats \
     --output-dir "${OUTPUT_DIR}" \
     2>&1 | tee "${LOG}"
