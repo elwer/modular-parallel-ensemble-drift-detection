@@ -208,12 +208,13 @@ def run_single_benchmark(detector, stream_length, drift_frequency, seed):
 
 
 def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
-                               seed, scenario="random"):
+                               seed, scenario="random", decision_window=10):
     """Run n_detectors DDs sequentially (no threading) on a stream.
 
-    Simulates a sequential ensemble: for each sample, call update() on
-    every detector one after another.  This is the fair baseline for
-    judging the communication overhead of ThreadsDeployment.
+    Replicates the same computation as ThreadsDeployment: for each sample,
+    call update() on every detector, maintain per-detector decision history,
+    compute level1 decisions, and aggregate via majority vote.
+    This is the fair baseline for judging the communication overhead.
     """
     rng = random.Random(seed)
 
@@ -229,17 +230,43 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
     stream_iter = iter(stream)
     first_x, _ = next(stream_iter)
 
+    # Per-detector decision history (mirrors DetectorWorker)
+    histories = [deque(maxlen=decision_window) for _ in range(n_detectors)]
+    drift_counts = [0] * n_detectors
+
+    def add_to_history(i, result):
+        hist = histories[i]
+        if len(hist) == hist.maxlen:
+            if hist[0]:
+                drift_counts[i] -= 1
+        hist.append(result)
+        if result:
+            drift_counts[i] += 1
+
+    def level1_decision(i):
+        hist = histories[i]
+        if not hist:
+            return False
+        n = len(hist)
+        return drift_counts[i] >= (n + 1) // 2  # majority
+
     # Warm up
-    for det in detectors:
-        det.update(first_x)
+    for i, det in enumerate(detectors):
+        raw = det.update(first_x)
+        add_to_history(i, raw)
 
     t0 = time.perf_counter()
     n_samples = 1
     drift_count = 0
     for x, _ in stream_iter:
-        for det in detectors:
-            if det.update(x):
-                pass  # individual drift, not aggregated
+        results = [False] * n_detectors
+        for i, det in enumerate(detectors):
+            raw = det.update(x)
+            add_to_history(i, raw)
+            results[i] = level1_decision(i)
+        # Majority vote (same as parallel ensemble)
+        if sum(results) >= (n_detectors + 1) // 2:
+            drift_count += 1
         n_samples += 1
     elapsed = time.perf_counter() - t0
 
@@ -249,7 +276,7 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
         "elapsed_sec": elapsed,
         "throughput_sps": n_samples / elapsed if elapsed > 0 else 0,
         "latency_ms": (elapsed / n_samples) * 1000 if n_samples > 0 else 0,
-        "drift_count": 0,
+        "drift_count": drift_count,
         "scenario": scenario,
     }
 
