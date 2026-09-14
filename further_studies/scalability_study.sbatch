@@ -4,9 +4,10 @@
 #SBATCH --job-name=Scalability
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=128
+#SBATCH --cpus-per-task=64
 #SBATCH --time=00:30:00
 #SBATCH --mem-per-cpu=1024
+#SBATCH --hin=nomultithread
 
 set -euo pipefail
 
