@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --time=00:30:00
 #SBATCH --mem-per-cpu=1024
-#SBATCH --hin=nomultithread
+#SBATCH --hint=nomultithread
 
 set -euo pipefail
 
@@ -32,6 +32,5 @@ python -u further_studies/run_scalability_study.py \
     --scenario balanced \
     --track-stats \
     --use-jumper \
-    --pin-cpus \
     --output-dir "${OUTPUT_DIR}" \
     2>&1 | tee "${LOG}"
