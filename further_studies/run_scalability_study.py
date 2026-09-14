@@ -207,6 +207,53 @@ def run_single_benchmark(detector, stream_length, drift_frequency, seed):
     }
 
 
+def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
+                               seed, scenario="random"):
+    """Run n_detectors DDs sequentially (no threading) on a stream.
+
+    Simulates a sequential ensemble: for each sample, call update() on
+    every detector one after another.  This is the fair baseline for
+    judging the communication overhead of ThreadsDeployment.
+    """
+    rng = random.Random(seed)
+
+    if scenario == "balanced":
+        pool_names, detectors = build_balanced_pool(n_detectors, rng)
+    elif scenario == "unbalanced":
+        pool_names, detectors = build_unbalanced_pool(n_detectors, rng)
+    else:
+        pool_names = build_pool(rng, n_total=n_detectors)
+        detectors = materialize_pool(pool_names, rng)
+
+    stream = build_stream("SineClusters", drift_frequency, stream_length, seed)
+    stream_iter = iter(stream)
+    first_x, _ = next(stream_iter)
+
+    # Warm up
+    for det in detectors:
+        det.update(first_x)
+
+    t0 = time.perf_counter()
+    n_samples = 1
+    drift_count = 0
+    for x, _ in stream_iter:
+        for det in detectors:
+            if det.update(x):
+                pass  # individual drift, not aggregated
+        n_samples += 1
+    elapsed = time.perf_counter() - t0
+
+    return {
+        "n_detectors": n_detectors,
+        "stream_length": n_samples,
+        "elapsed_sec": elapsed,
+        "throughput_sps": n_samples / elapsed if elapsed > 0 else 0,
+        "latency_ms": (elapsed / n_samples) * 1000 if n_samples > 0 else 0,
+        "drift_count": 0,
+        "scenario": scenario,
+    }
+
+
 def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
                               seed, decision_window=10, scenario="random",
                               track_stats=False):
@@ -370,7 +417,31 @@ def main():
             logger.info(f"  -> {result['throughput_sps']:.1f} sps, "
                         f"{result['latency_ms']:.2f} ms/sample")
 
-    # ---- Ensemble runs ----
+    # ---- Sequential ensemble baselines ----
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Sequential ensemble baselines (no threading, K detectors per sample)")
+    logger.info(f"{'='*60}")
+
+    for size in ensemble_sizes:
+        for rep in range(args.n_repeats):
+            seed = args.seed + rep * 1000
+            logger.info(f"  K={size} Rep {rep+1}/{args.n_repeats} (seed={seed})")
+            result = run_sequential_benchmark(
+                n_detectors=size,
+                stream_length=args.stream_length,
+                drift_frequency=args.drift_frequency,
+                seed=seed,
+                scenario=args.scenario,
+            )
+            result["rep"] = rep
+            result["seed"] = seed
+            result["mode"] = "sequential"
+            all_results.append(result)
+            logger.info(f"  -> {result['throughput_sps']:.1f} sps, "
+                        f"{result['latency_ms']:.2f} ms/sample, "
+                        f"{result['elapsed_sec']:.2f}s total")
+
+    # ---- Ensemble runs (parallel) ----
     for size in ensemble_sizes:
         logger.info(f"\n{'='*60}")
         logger.info(f"Ensemble size: {size} detectors (ThreadsDeployment)")
@@ -455,26 +526,46 @@ def main():
     print(f"  (across {len(single_runs)} individual detector runs)")
     print(f"  Baseline = slowest single DD (bottleneck if run sequentially)")
 
-    print(f"\n--- Ensemble (ThreadsDeployment, parallel, scenario={args.scenario}) ---")
+    # Sequential ensemble baselines (K detectors per sample, no threading)
+    print(f"\n--- Sequential ensemble (K detectors per sample, no threading) ---")
+    print(f"{'K':>6} {'Throughput (sps)':>20} {'Latency (ms)':>15} "
+          f"{'Wall time (s)':>15}")
+    print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15}")
+    for size in ensemble_sizes:
+        seq_runs = [r for r in all_results if r.get("mode") == "sequential" and r["n_detectors"] == size]
+        if not seq_runs:
+            continue
+        seq_tps = [r["throughput_sps"] for r in seq_runs]
+        seq_lats = [r["latency_ms"] for r in seq_runs]
+        seq_times = [r["elapsed_sec"] for r in seq_runs]
+        print(f"{size:>6} {np.mean(seq_tps):>10.1f}+/-{np.std(seq_tps):>5.1f} "
+              f"{np.mean(seq_lats):>8.2f}+/-{np.std(seq_lats):>4.2f} "
+              f"{np.mean(seq_times):>8.2f}+/-{np.std(seq_times):>4.2f}")
+
+    # Parallel ensemble
+    print(f"\n--- Parallel ensemble (ThreadsDeployment, scenario={args.scenario}) ---")
     if args.track_stats:
         print(f"{'K':>6} {'Throughput (sps)':>20} {'Latency (ms)':>15} "
               f"{'Wall time (s)':>15} {'Overhead':>10} "
-              f"{'Wkr work%':>10} {'Main wait%':>11}")
-        print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10} {'-'*10} {'-'*11}")
+              f"{'Speedup':>8} {'Wkr work%':>10} {'Main wait%':>11}")
+        print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10} {'-'*8} {'-'*10} {'-'*11}")
     else:
         print(f"{'K':>6} {'Throughput (sps)':>20} {'Latency (ms)':>15} "
-              f"{'Wall time (s)':>15} {'Overhead':>10}")
-        print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10}")
+              f"{'Wall time (s)':>15} {'Overhead':>10} {'Speedup':>8}")
+        print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10} {'-'*8}")
 
     for size in ensemble_sizes:
         runs = [r for r in all_results if r.get("mode") == "ensemble" and r["n_detectors"] == size]
+        seq_runs = [r for r in all_results if r.get("mode") == "sequential" and r["n_detectors"] == size]
         tps = [r["throughput_sps"] for r in runs]
         lats = [r["latency_ms"] for r in runs]
         times = [r["elapsed_sec"] for r in runs]
         mean_ens_time = np.mean(times) if times else 0
         # Overhead = ensemble_wall_time / slowest_single_time
-        # Ideal = 1.0 (all K detectors finish in the time of the slowest one)
         overhead = mean_ens_time / slowest_single_time if slowest_single_time > 0 else 0
+        # Speedup vs sequential = seq_time / parallel_time
+        seq_mean_time = np.mean([r["elapsed_sec"] for r in seq_runs]) if seq_runs else 0
+        speedup = seq_mean_time / mean_ens_time if mean_ens_time > 0 else 0
         if args.track_stats:
             wkr_ratios = [r.get("worker_mean_work_ratio", 0) for r in runs]
             main_ratios = [r.get("main_wait_ratio", 0) for r in runs]
@@ -482,17 +573,19 @@ def main():
                   f"{np.mean(lats):>8.2f}+/-{np.std(lats):>4.2f} "
                   f"{np.mean(times):>8.2f}+/-{np.std(times):>4.2f} "
                   f"{overhead:>6.2f}x "
+                  f"{speedup:>6.2f}x "
                   f"{np.mean(wkr_ratios)*100:>8.1f}% "
                   f"{np.mean(main_ratios)*100:>9.1f}%")
         else:
             print(f"{size:>6} {np.mean(tps):>10.1f}+/-{np.std(tps):>5.1f} "
                   f"{np.mean(lats):>8.2f}+/-{np.std(lats):>4.2f} "
                   f"{np.mean(times):>8.2f}+/-{np.std(times):>4.2f} "
-                  f"{overhead:>6.2f}x")
+                  f"{overhead:>6.2f}x "
+                  f"{speedup:>6.2f}x")
 
-    print(f"\n  Overhead = ensemble_wall_time / slowest_single_time")
-    print(f"  Ideal overhead = 1.0x (K detectors in parallel take same time as slowest alone)")
-    print(f"  Overhead > 1.0 = communication/synchronization cost of threading")
+    print(f"\n  Overhead = parallel_wall_time / slowest_single_time (ideal = 1.0x)")
+    print(f"  Speedup  = sequential_ensemble_time / parallel_ensemble_time (ideal = K)")
+    print(f"  Speedup > 1.0 = parallel ensemble is faster than sequential ensemble")
     if args.track_stats:
         print(f"  Wkr work%  = mean fraction of wall time workers spend in detector.update()")
         print(f"  Main wait% = fraction of wall time main thread spends spinning on results")
@@ -509,17 +602,31 @@ def main():
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
         header = ["mode", "n_detectors", "rep", "throughput_sps", "latency_ms",
-                  "elapsed_sec", "drift_count", "detector_type", "scenario"]
+                  "elapsed_sec", "drift_count", "detector_type", "scenario",
+                  "speedup_vs_sequential"]
         if args.track_stats:
             header += ["main_wait_time", "main_wait_ratio",
                        "worker_mean_work_ratio", "worker_min_work_ratio",
                        "worker_max_work_ratio"]
         w.writerow(header)
+        # Precompute mean sequential times per K for speedup column
+        seq_time_by_k = {}
+        for size in ensemble_sizes:
+            seq_runs = [r for r in all_results
+                        if r.get("mode") == "sequential" and r["n_detectors"] == size]
+            if seq_runs:
+                seq_time_by_k[size] = np.mean([r["elapsed_sec"] for r in seq_runs])
+
         for r in all_results:
+            speedup = ""
+            if r.get("mode") == "ensemble" and r["n_detectors"] in seq_time_by_k:
+                speedup = (seq_time_by_k[r["n_detectors"]] / r["elapsed_sec"]
+                           if r["elapsed_sec"] > 0 else 0)
             row = [r.get("mode", "ensemble"), r["n_detectors"], r["rep"],
                    r["throughput_sps"], r["latency_ms"],
                    r["elapsed_sec"], r["drift_count"],
-                   r.get("detector_type", ""), r.get("scenario", "")]
+                   r.get("detector_type", ""), r.get("scenario", ""),
+                   speedup]
             if args.track_stats:
                 row += [r.get("main_wait_time", ""), r.get("main_wait_ratio", ""),
                         r.get("worker_mean_work_ratio", ""),
