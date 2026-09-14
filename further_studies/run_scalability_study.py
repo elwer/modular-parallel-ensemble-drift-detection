@@ -51,6 +51,7 @@ ENSEMBLE_SIZES = [2, 4, 8, 16, 32, 64, 128]
 CANDIDATES = ["CSDDM", "D3", "IBDD", "OCDD", "SPLL", "UDetect"]
 
 CLASS_PATH = {
+    "BNDM":   "detectors.bndm.BNDM",
     "CSDDM":  "detectors.csddm.CSDDM",
     "D3":     "detectors.d3.D3",
     "IBDD":   "detectors.ibdd.IBDD",
@@ -147,11 +148,16 @@ def materialize_pool(pool_names, rng):
 
 
 def build_balanced_pool(n_detectors, rng):
-    """All detectors are the same type (OCDD) with identical fast params."""
-    names = ["OCDD"] * n_detectors
-    params = {"n_samples": 50, "threshold": 0.5, "recent_samples_size": 50}
+    """All detectors are the same type (BNDM) with identical params.
+
+    BNDM scales with n_features: its detection step runs a Polya tree test
+    per feature, so higher-dimensional streams produce heavier per-sample work.
+    """
+    names = ["BNDM"] * n_detectors
+    params = {"n_samples": 50, "threshold": 0.5, "max_depth": 3,
+              "recent_samples_size": 50}
     from main_synthetic import get_detector_class
-    cls = get_detector_class(CLASS_PATH["OCDD"])
+    cls = get_detector_class(CLASS_PATH["BNDM"])
     detectors = []
     for i in range(n_detectors):
         det = cls(seed=rng.randint(0, 99999), **params)
