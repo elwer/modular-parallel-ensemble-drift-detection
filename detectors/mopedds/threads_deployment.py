@@ -8,11 +8,12 @@ Design goals:
 - Workers run continuously without idle time
 """
 
+import os
 import threading
 import logging
 import time
 from collections import deque
-from typing import List, Optional
+from typing import List, Optional, Set
 
 import scorep.user
 
@@ -49,10 +50,12 @@ class DetectorWorker(threading.Thread):
     """
     __slots__ = ['detector_idx', 'detector', 'slot', 'running', 'last_processed_id',
                  'deployment', 'name', 'decision_history', 'drift_count',
-                 'track_stats', 'work_time', 'total_time', 'run_start']
+                 'track_stats', 'work_time', 'total_time', 'run_start',
+                 'cpu_affinity']
     
     def __init__(self, detector_idx: int, detector: UnsupervisedDriftDetector,
-                 slot: WorkerSlot, deployment, track_stats: bool = False):
+                 slot: WorkerSlot, deployment, track_stats: bool = False,
+                 cpu_affinity: Optional[int] = None):
         super().__init__(daemon=True)
         self.detector_idx = detector_idx
         self.detector = detector
@@ -67,6 +70,7 @@ class DetectorWorker(threading.Thread):
         self.work_time: float = 0.0
         self.total_time: float = 0.0
         self.run_start: float = 0.0
+        self.cpu_affinity = cpu_affinity
     
     def _add_to_history(self, result: bool) -> None:
         """Add result to history and update drift_count incrementally."""
@@ -103,6 +107,13 @@ class DetectorWorker(threading.Thread):
     
     def run(self):
         with scorep.user.region(f"{self.name}.run"):
+            # Pin this thread to a specific CPU core if requested
+            if self.cpu_affinity is not None:
+                try:
+                    os.sched_setaffinity(0, {self.cpu_affinity})
+                except (OSError, AttributeError):
+                    pass  # Not supported on this platform
+
             slot = self.slot  # Local reference for speed
             detector = self.detector
             deployment = self.deployment
@@ -184,13 +195,15 @@ class ThreadsDeployment:
                  mopedds=None,
                  detector_decision_criteria: str = "majority",
                  decision_window: int = 10,
-                 track_stats: bool = False):
+                 track_stats: bool = False,
+                 pin_cpus: bool = False):
         self.detectors = detectors
         self.verbose = verbose
         self.mopedds = mopedds  # Reference to MOPEDDS for suppression flag
         self.detector_decision_criteria = detector_decision_criteria
         self.decision_window = decision_window
         self.track_stats = track_stats
+        self.pin_cpus = pin_cpus
         
         # Worker slots and threads
         self.slots: List[WorkerSlot] = []
@@ -218,9 +231,20 @@ class ThreadsDeployment:
         ]
         self.workers = []
         
+        # Determine CPU affinity for workers
+        cpu_affinity = None
+        if self.pin_cpus:
+            avail_cpus = sorted(os.sched_getaffinity(0))
+            # Reserve CPU 0 for the main thread, pin workers to CPUs 1..N
+            worker_cpus = avail_cpus[1:num_detectors + 1] if len(avail_cpus) > num_detectors else avail_cpus
+
         for idx, detector in enumerate(self.detectors):
+            cpu_id = None
+            if self.pin_cpus and idx < len(worker_cpus):
+                cpu_id = worker_cpus[idx]
             worker = DetectorWorker(idx, detector, self.slots[idx], self,
-                                    track_stats=self.track_stats)
+                                    track_stats=self.track_stats,
+                                    cpu_affinity=cpu_id)
             worker.start()
             self.workers.append(worker)
         

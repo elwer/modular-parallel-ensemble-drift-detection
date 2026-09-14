@@ -22,6 +22,7 @@ import json
 import random
 import logging
 import argparse
+import numpy as np
 from typing import Dict, List, Callable
 from collections import deque
 
@@ -283,7 +284,8 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
 
 def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
                               seed, decision_window=10, scenario="random",
-                              track_stats=False):
+                              track_stats=False, pin_cpus=False,
+                              single_update_time=None):
     """Deploy n_detectors DDs via ThreadsDeployment and run a stream."""
     rng = random.Random(seed)
 
@@ -305,6 +307,7 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
         detector_decision_criteria="majority",
         decision_window=decision_window,
         track_stats=track_stats,
+        pin_cpus=pin_cpus,
     )
     deployment.initialize()
 
@@ -379,6 +382,13 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
             )
             result["worker_min_work_ratio"] = min(w["work_ratio"] for w in worker_stats)
             result["worker_max_work_ratio"] = max(w["work_ratio"] for w in worker_stats)
+            # Contention penalty: how much slower is detector.update() in parallel vs single?
+            mean_work_time = sum(w["work_time"] for w in worker_stats) / len(worker_stats)
+            parallel_update_per_sample = mean_work_time / n_samples if n_samples > 0 else 0
+            result["parallel_update_ms"] = parallel_update_per_sample * 1000
+            if single_update_time is not None and single_update_time > 0:
+                result["contention_penalty"] = parallel_update_per_sample / single_update_time
+                result["single_update_ms"] = single_update_time * 1000
 
     return result
 
@@ -404,6 +414,8 @@ def main():
                     help="Enable JUmPER performance monitoring for each ensemble run")
     ap.add_argument("--jumper-sampling-interval", type=float, default=2.0,
                     help="JUmPER sampling interval in seconds (default 2.0)")
+    ap.add_argument("--pin-cpus", action="store_true",
+                    help="Pin worker threads to specific CPU cores (CPU 0 reserved for main thread)")
     args = ap.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -468,6 +480,14 @@ def main():
                         f"{result['latency_ms']:.2f} ms/sample, "
                         f"{result['elapsed_sec']:.2f}s total")
 
+    # Compute mean single-detector update time for contention penalty
+    single_runs = [r for r in all_results if r.get("mode") == "single"]
+    if single_runs:
+        single_update_time = np.mean([r["elapsed_sec"] / r["stream_length"]
+                                       for r in single_runs])
+    else:
+        single_update_time = None
+
     # ---- Ensemble runs (parallel) ----
     for size in ensemble_sizes:
         logger.info(f"\n{'='*60}")
@@ -497,6 +517,8 @@ def main():
                             seed=seed,
                             scenario=args.scenario,
                             track_stats=args.track_stats,
+                            pin_cpus=args.pin_cpus,
+                            single_update_time=single_update_time,
                         )
                 else:
                     result = run_scalability_benchmark(
@@ -506,6 +528,8 @@ def main():
                         seed=seed,
                         scenario=args.scenario,
                         track_stats=args.track_stats,
+                        pin_cpus=args.pin_cpus,
+                        single_update_time=single_update_time,
                     )
             finally:
                 if jumper_service is not None:
@@ -523,7 +547,6 @@ def main():
                         f"{result['elapsed_sec']:.2f}s total")
 
     # Summary table
-    import numpy as np
 
     # Single-detector baselines
     single_runs = [r for r in all_results if r.get("mode") == "single"]
@@ -574,8 +597,8 @@ def main():
     if args.track_stats:
         print(f"{'K':>6} {'Throughput (sps)':>20} {'Latency (ms)':>15} "
               f"{'Wall time (s)':>15} {'Overhead':>10} "
-              f"{'Speedup':>8} {'Wkr work%':>10} {'Main wait%':>11}")
-        print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10} {'-'*8} {'-'*10} {'-'*11}")
+              f"{'Speedup':>8} {'Contend':>8} {'Wkr work%':>10} {'Main wait%':>11}")
+        print(f"{'-'*6} {'-'*20} {'-'*15} {'-'*15} {'-'*10} {'-'*8} {'-'*8} {'-'*10} {'-'*11}")
     else:
         print(f"{'K':>6} {'Throughput (sps)':>20} {'Latency (ms)':>15} "
               f"{'Wall time (s)':>15} {'Overhead':>10} {'Speedup':>8}")
@@ -596,11 +619,13 @@ def main():
         if args.track_stats:
             wkr_ratios = [r.get("worker_mean_work_ratio", 0) for r in runs]
             main_ratios = [r.get("main_wait_ratio", 0) for r in runs]
+            contend = [r.get("contention_penalty", 0) for r in runs]
             print(f"{size:>6} {np.mean(tps):>10.1f}+/-{np.std(tps):>5.1f} "
                   f"{np.mean(lats):>8.2f}+/-{np.std(lats):>4.2f} "
                   f"{np.mean(times):>8.2f}+/-{np.std(times):>4.2f} "
                   f"{overhead:>6.2f}x "
                   f"{speedup:>6.2f}x "
+                  f"{np.mean(contend):>6.2f}x "
                   f"{np.mean(wkr_ratios)*100:>8.1f}% "
                   f"{np.mean(main_ratios)*100:>9.1f}%")
         else:
@@ -616,6 +641,7 @@ def main():
     if args.track_stats:
         print(f"  Wkr work%  = mean fraction of wall time workers spend in detector.update()")
         print(f"  Main wait% = fraction of wall time main thread spends spinning on results")
+        print(f"  Contend    = how much slower detector.update() is in parallel vs single (1.0x = no penalty)")
 
     # Save JSON
     out_path = os.path.join(args.output_dir, "scalability_results.json")
@@ -634,7 +660,8 @@ def main():
         if args.track_stats:
             header += ["main_wait_time", "main_wait_ratio",
                        "worker_mean_work_ratio", "worker_min_work_ratio",
-                       "worker_max_work_ratio"]
+                       "worker_max_work_ratio",
+                       "parallel_update_ms", "single_update_ms", "contention_penalty"]
         w.writerow(header)
         # Precompute mean sequential times per K for speedup column
         seq_time_by_k = {}
@@ -658,7 +685,9 @@ def main():
                 row += [r.get("main_wait_time", ""), r.get("main_wait_ratio", ""),
                         r.get("worker_mean_work_ratio", ""),
                         r.get("worker_min_work_ratio", ""),
-                        r.get("worker_max_work_ratio", "")]
+                        r.get("worker_max_work_ratio", ""),
+                        r.get("parallel_update_ms", ""), r.get("single_update_ms", ""),
+                        r.get("contention_penalty", "")]
             w.writerow(row)
     logger.info(f"CSV saved to {csv_path}")
 

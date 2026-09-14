@@ -31,5 +31,6 @@ python -u further_studies/run_scalability_study.py \
     --scenario balanced \
     --track-stats \
     --use-jumper \
+    --pin-cpus \
     --output-dir "${OUTPUT_DIR}" \
     2>&1 | tee "${LOG}"
