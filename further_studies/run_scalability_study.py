@@ -154,8 +154,8 @@ def build_balanced_pool(n_detectors, rng):
     per feature, so higher-dimensional streams produce heavier per-sample work.
     """
     names = ["BNDM"] * n_detectors
-    params = {"n_samples": 50, "threshold": 0.5, "max_depth": 3,
-              "recent_samples_size": 50}
+    params = {"n_samples": 10, "threshold": 0.5, "max_depth": 3,
+              "recent_samples_size": 10}
     from main_synthetic import get_detector_class
     cls = get_detector_class(CLASS_PATH["BNDM"])
     detectors = []
