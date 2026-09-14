@@ -78,13 +78,14 @@ from main_synthetic import (  # noqa: E402
 # Lazy import of the generator classes (kept inside the GENERATORS map so the
 # top of this file stays decoupled from dataset code paths during --help).
 from datasets.sineclusters import SineClusters  # noqa: E402
+from datasets.sineclusters_highdim import SineClustersHighDim  # noqa: E402
 
 try:
     from datasets.waveform import WaveformDrift2  # noqa: E402
 except Exception:  # pragma: no cover - waveform module optional in some checkouts
     WaveformDrift2 = None  # type: ignore[assignment]
 
-GENERATORS = {"SineClusters": SineClusters}
+GENERATORS = {"SineClusters": SineClusters, "SineClustersHighDim": SineClustersHighDim}
 if WaveformDrift2 is not None:
     GENERATORS["WaveformDrift2"] = WaveformDrift2
 
@@ -111,12 +112,12 @@ CLASS_PATH = {
 
 
 def build_stream(generator_name: str, drift_frequency: int,
-                 stream_length: int, seed: int):
+                 stream_length: int, seed: int, **kwargs):
     """Instantiate a fresh synthetic stream with the given seed."""
     cls = GENERATORS[generator_name]
     return cls(drift_frequency=drift_frequency,
                stream_length=stream_length,
-               seed=seed)
+               seed=seed, **kwargs)
 
 
 # Fraction of the smallest inter-drift gap that a detector's recent/comparison

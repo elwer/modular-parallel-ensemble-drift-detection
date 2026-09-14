@@ -31,6 +31,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from optimization.synthetic_f1_multistream_optimize_optuna import build_stream
 from detectors.mopedds.threads_deployment import ThreadsDeployment
 
+def make_stream(drift_frequency, stream_length, seed, n_dimensions=4):
+    """Build a stream with the requested number of dimensions."""
+    if n_dimensions > 4:
+        return build_stream("SineClustersHighDim", drift_frequency, stream_length, seed,
+                            n_features=n_dimensions)
+    return build_stream("SineClusters", drift_frequency, stream_length, seed)
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -180,9 +187,10 @@ class _DummyMOPEDDS:
         self.in_suppression = False
 
 
-def run_single_benchmark(detector, stream_length, drift_frequency, seed):
+def run_single_benchmark(detector, stream_length, drift_frequency, seed,
+                         n_dimensions=4):
     """Run a single detector sequentially on a stream (no threading)."""
-    stream = build_stream("SineClusters", drift_frequency, stream_length, seed)
+    stream = make_stream(drift_frequency, stream_length, seed, n_dimensions)
     stream_iter = iter(stream)
     first_x, _ = next(stream_iter)
 
@@ -209,7 +217,8 @@ def run_single_benchmark(detector, stream_length, drift_frequency, seed):
 
 
 def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
-                               seed, scenario="random", decision_window=10):
+                               seed, scenario="random", decision_window=10,
+                               n_dimensions=4):
     """Run n_detectors DDs sequentially (no threading) on a stream.
 
     Replicates the same computation as ThreadsDeployment: for each sample,
@@ -227,7 +236,7 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
         pool_names = build_pool(rng, n_total=n_detectors)
         detectors = materialize_pool(pool_names, rng)
 
-    stream = build_stream("SineClusters", drift_frequency, stream_length, seed)
+    stream = make_stream(drift_frequency, stream_length, seed, n_dimensions)
     stream_iter = iter(stream)
     first_x, _ = next(stream_iter)
 
@@ -285,7 +294,7 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
 def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
                               seed, decision_window=10, scenario="random",
                               track_stats=False, pin_cpus=False,
-                              single_update_time=None):
+                              single_update_time=None, n_dimensions=4):
     """Deploy n_detectors DDs via ThreadsDeployment and run a stream."""
     rng = random.Random(seed)
 
@@ -297,7 +306,7 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
         pool_names = build_pool(rng, n_total=n_detectors)
         detectors = materialize_pool(pool_names, rng)
 
-    stream = build_stream("SineClusters", drift_frequency, stream_length, seed)
+    stream = make_stream(drift_frequency, stream_length, seed, n_dimensions)
 
     dummy_mopedds = _DummyMOPEDDS()
     deployment = ThreadsDeployment(
@@ -424,6 +433,8 @@ def main():
                     help="JUmPER sampling interval in seconds (default 2.0)")
     ap.add_argument("--pin-cpus", action="store_true",
                     help="Pin worker threads to specific CPU cores (CPU 0 reserved for main thread)")
+    ap.add_argument("--n-dimensions", type=int, default=4,
+                    help="Number of features per datapoint (default 4, increase for heavier work per sample)")
     args = ap.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -454,7 +465,8 @@ def main():
             logger.info(f"  Rep {rep+1}/{args.n_repeats} detector {i+1}/{len(detectors)} "
                         f"({pool_names[i]})")
             result = run_single_benchmark(
-                det, args.stream_length, args.drift_frequency, seed)
+                det, args.stream_length, args.drift_frequency, seed,
+                n_dimensions=args.n_dimensions)
             result["rep"] = rep
             result["seed"] = seed
             result["mode"] = "single"
@@ -479,6 +491,7 @@ def main():
                 drift_frequency=args.drift_frequency,
                 seed=seed,
                 scenario=args.scenario,
+                n_dimensions=args.n_dimensions,
             )
             result["rep"] = rep
             result["seed"] = seed
@@ -527,6 +540,7 @@ def main():
                             track_stats=args.track_stats,
                             pin_cpus=args.pin_cpus,
                             single_update_time=single_update_time,
+                            n_dimensions=args.n_dimensions,
                         )
                 else:
                     result = run_scalability_benchmark(
@@ -538,6 +552,7 @@ def main():
                         track_stats=args.track_stats,
                         pin_cpus=args.pin_cpus,
                         single_update_time=single_update_time,
+                        n_dimensions=args.n_dimensions,
                     )
             finally:
                 if jumper_service is not None:
@@ -575,7 +590,7 @@ def main():
     print(f"\n{'='*95}")
     print(f"SCALABILITY SUMMARY  (stream_length={args.stream_length}, "
           f"drift_freq={args.drift_frequency}, repeats={args.n_repeats}, "
-          f"scenario={args.scenario})")
+          f"scenario={args.scenario}, n_dim={args.n_dimensions})")
     print(f"{'='*95}")
     print(f"\n--- Single-detector baselines (sequential, no threading) ---")
     print(f"  Fastest: {fastest_single_time:.3f}s  ({1000/fastest_single_time:.0f} sps)")

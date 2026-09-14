@@ -30,6 +30,7 @@ python -u further_studies/run_scalability_study.py \
     --n-repeats 3 \
     --seed 42 \
     --scenario balanced \
+    --n-dimensions 32 \
     --track-stats \
     --use-jumper \
     --output-dir "${OUTPUT_DIR}" \
