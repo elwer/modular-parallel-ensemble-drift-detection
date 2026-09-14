@@ -49,7 +49,7 @@ class DetectorWorker(threading.Thread):
     """
     __slots__ = ['detector_idx', 'detector', 'slot', 'running', 'last_processed_id',
                  'deployment', 'name', 'decision_history', 'drift_count',
-                 'track_stats', 'work_time', 'total_time']
+                 'track_stats', 'work_time', 'total_time', 'run_start']
     
     def __init__(self, detector_idx: int, detector: UnsupervisedDriftDetector,
                  slot: WorkerSlot, deployment, track_stats: bool = False):
@@ -66,6 +66,7 @@ class DetectorWorker(threading.Thread):
         self.track_stats = track_stats
         self.work_time: float = 0.0
         self.total_time: float = 0.0
+        self.run_start: float = 0.0
     
     def _add_to_history(self, result: bool) -> None:
         """Add result to history and update drift_count incrementally."""
@@ -106,7 +107,7 @@ class DetectorWorker(threading.Thread):
             detector = self.detector
             deployment = self.deployment
             last_id = 0
-            run_start = time.perf_counter() if self.track_stats else 0.0
+            self.run_start = time.perf_counter() if self.track_stats else 0.0
 
             while self.running:
                 # Check if we need to clear history (after drift detection)
@@ -145,20 +146,24 @@ class DetectorWorker(threading.Thread):
                 last_id = current_id
 
             if self.track_stats:
-                self.total_time = time.perf_counter() - run_start
+                self.total_time = time.perf_counter() - self.run_start
     
     def stop(self):
         self.running = False
 
     def get_stats(self) -> dict:
-        busy_wait = self.total_time - self.work_time
+        if self.track_stats and self.running and self.run_start > 0:
+            total = time.perf_counter() - self.run_start
+        else:
+            total = self.total_time
+        busy_wait = total - self.work_time
         return {
             "worker_idx": self.detector_idx,
             "worker_name": self.name,
             "work_time": self.work_time,
-            "total_time": self.total_time,
+            "total_time": total,
             "busy_wait_time": busy_wait,
-            "work_ratio": self.work_time / self.total_time if self.total_time > 0 else 0.0,
+            "work_ratio": self.work_time / total if total > 0 else 0.0,
         }
 
 
