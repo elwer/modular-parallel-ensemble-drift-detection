@@ -28,11 +28,12 @@ logger = logging.getLogger(__name__)
 class WorkerSlot:
     """
     Minimal shared memory slot for worker communication.
-    Uses a simple sample_id counter for synchronization.
+    Uses threading.Event for low-overhead synchronization.
     """
-    __slots__ = ['sample_id', 'data', 'result', 'result_ready', 
-                 'decision_criteria', 'decision_window', 'clear_history']
-    
+    __slots__ = ['sample_id', 'data', 'result', 'result_ready',
+                 'decision_criteria', 'decision_window', 'clear_history',
+                 'data_ready_event', 'result_ready_event']
+
     def __init__(self, decision_criteria: str = "majority", decision_window: int = 10):
         self.sample_id: int = 0
         self.data: Optional[dict] = None
@@ -41,11 +42,13 @@ class WorkerSlot:
         self.decision_criteria: str = decision_criteria
         self.decision_window: int = decision_window
         self.clear_history: bool = False  # Signal to clear decision history
+        self.data_ready_event = threading.Event()
+        self.result_ready_event = threading.Event()
 
 
 class DetectorWorker(threading.Thread):
     """
-    Optimized worker thread. Spins on sample_id changes.
+    Optimized worker thread. Waits on data_ready_event for new samples.
     Maintains local decision history and computes level 1 decisions.
     """
     __slots__ = ['detector_idx', 'detector', 'slot', 'running', 'last_processed_id',
@@ -121,16 +124,18 @@ class DetectorWorker(threading.Thread):
             self.run_start = time.perf_counter() if self.track_stats else 0.0
 
             while self.running:
+                # Wait for new data (blocks without burning CPU)
+                slot.data_ready_event.wait()
+                slot.data_ready_event.clear()
+
                 # Check if we need to clear history (after drift detection)
                 if slot.clear_history:
                     self._clear_history()
                     slot.clear_history = False
-                
-                # Spin until new sample arrives
+
                 current_id = slot.sample_id
                 if current_id <= last_id:
-                    os.sched_yield()
-                    continue
+                    continue  # Spurious wakeup or already processed
 
                 # Process the sample
                 data = slot.data
@@ -149,11 +154,12 @@ class DetectorWorker(threading.Thread):
 
                 # Always add raw result to local history (DDs should always process)
                 self._add_to_history(raw_result)
-                
+
                 # Compute level 1 decision (O(1) using drift_count)
                 level1_decision = self._apply_level1_decision()
                 slot.result = level1_decision
                 slot.result_ready = True
+                slot.result_ready_event.set()
 
                 last_id = current_id
 
@@ -162,6 +168,7 @@ class DetectorWorker(threading.Thread):
     
     def stop(self):
         self.running = False
+        self.slot.data_ready_event.set()  # Wake up worker if blocked on wait()
 
     def get_stats(self) -> dict:
         if self.track_stats and self.running and self.run_start > 0:
@@ -185,9 +192,9 @@ class ThreadsDeployment:
     
     Architecture:
     - One WorkerSlot per detector (contains data + result)
-    - Main thread writes data by incrementing sample_id
-    - Workers spin on sample_id, process, write result
-    - Main thread spins on result_ready flags
+    - Main thread writes data and signals workers via data_ready_event
+    - Workers wait on data_ready_event, process, signal result via result_ready_event
+    - Main thread waits on result_ready_event for all workers
     - Workers compute level 1 decisions locally (distributed computation)
     """
     
@@ -293,27 +300,21 @@ class ThreadsDeployment:
         for slot in self.slots:
             slot.data = data
             slot.result_ready = False
-            slot.sample_id = sample_id  # This signals the worker
+            slot.result_ready_event.clear()
+            slot.sample_id = sample_id
+            slot.data_ready_event.set()  # Signal worker to start
         
         # If in suppression, return immediately (workers still process but don't write results)
         if self.mopedds and self.mopedds.in_suppression:
             return None
         
-        # Wait for all results
+        # Wait for all results (blocks without burning CPU)
         num_workers = len(self.slots)
         results = [False] * num_workers
         
-        # Spin until all results ready
-        pending = set(range(num_workers))
-        while pending:
-            got_any = False
-            for idx in list(pending):
-                if self.slots[idx].result_ready:
-                    results[idx] = self.slots[idx].result
-                    pending.remove(idx)
-                    got_any = True
-            if not got_any:
-                os.sched_yield()
+        for idx in range(num_workers):
+            self.slots[idx].result_ready_event.wait()
+            results[idx] = self.slots[idx].result
         
         return results
 
