@@ -365,9 +365,9 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
     dummy_mopedds.sample_counter = 1
     for slot in deployment.slots:
         slot.data = first_x
-        slot.result_ready = False
         slot.result_ready_event.clear()
         slot.sample_id = 1
+    for slot in deployment.slots:
         slot.data_ready_event.set()
     # Wait for all workers to process first sample
     for idx in range(len(deployment.slots)):
@@ -383,9 +383,9 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
         sid = dummy_mopedds.sample_counter
         for slot in deployment.slots:
             slot.data = x
-            slot.result_ready = False
             slot.result_ready_event.clear()
             slot.sample_id = sid
+        for slot in deployment.slots:
             slot.data_ready_event.set()
         # Wait for all results
         results = [False] * len(deployment.slots)

@@ -30,7 +30,7 @@ class WorkerSlot:
     Minimal shared memory slot for worker communication.
     Uses threading.Event for low-overhead synchronization.
     """
-    __slots__ = ['sample_id', 'data', 'result', 'result_ready',
+    __slots__ = ['sample_id', 'data', 'result',
                  'decision_criteria', 'decision_window', 'clear_history',
                  'data_ready_event', 'result_ready_event']
 
@@ -38,7 +38,6 @@ class WorkerSlot:
         self.sample_id: int = 0
         self.data: Optional[dict] = None
         self.result: bool = False  # Now represents level 1 decision, not raw detector output
-        self.result_ready: bool = False
         self.decision_criteria: str = decision_criteria
         self.decision_window: int = decision_window
         self.clear_history: bool = False  # Signal to clear decision history
@@ -158,7 +157,6 @@ class DetectorWorker(threading.Thread):
                 # Compute level 1 decision (O(1) using drift_count)
                 level1_decision = self._apply_level1_decision()
                 slot.result = level1_decision
-                slot.result_ready = True
                 slot.result_ready_event.set()
 
                 last_id = current_id
@@ -299,9 +297,9 @@ class ThreadsDeployment:
         # Write data to all slots and signal workers
         for slot in self.slots:
             slot.data = data
-            slot.result_ready = False
             slot.result_ready_event.clear()
             slot.sample_id = sample_id
+        for slot in self.slots:
             slot.data_ready_event.set()  # Signal worker to start
         
         # If in suppression, return immediately (workers still process but don't write results)
