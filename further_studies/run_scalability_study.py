@@ -38,6 +38,39 @@ def make_stream(drift_frequency, stream_length, seed, n_dimensions=4):
                             n_features=n_dimensions)
     return build_stream("SineClusters", drift_frequency, stream_length, seed)
 
+
+class _ArrayDict:
+    """Lightweight dict-like wrapper around a numpy array.
+
+    Provides values() for compatibility with detectors that call
+    np.fromiter(data.values()).  Numpy array iteration is pure C-level
+    (no Python float object creation, no refcount manipulation), which
+    eliminates cache-line bouncing when many worker threads read the
+    same sample simultaneously.
+    """
+    __slots__ = ['_arr']
+
+    def __init__(self, arr):
+        self._arr = arr
+
+    def values(self):
+        return self._arr
+
+
+def materialize_stream(stream):
+    """Pre-materialize a stream into a list of (_ArrayDict, label) tuples.
+
+    Converts dict samples to numpy arrays wrapped in _ArrayDict so that:
+    - No generator overhead during timed runs
+    - No per-sample dict/float allocation
+    - No refcount contention when shared across worker threads
+    """
+    materialized = []
+    for x, y in stream:
+        arr = np.fromiter(x.values(), dtype=float)
+        materialized.append((_ArrayDict(arr), y))
+    return materialized
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -196,7 +229,7 @@ class _DummyMOPEDDS:
 def run_single_benchmark(detector, stream_length, drift_frequency, seed,
                          n_dimensions=4):
     """Run a single detector sequentially on a stream (no threading)."""
-    stream = make_stream(drift_frequency, stream_length, seed, n_dimensions)
+    stream = materialize_stream(make_stream(drift_frequency, stream_length, seed, n_dimensions))
     stream_iter = iter(stream)
     first_x, _ = next(stream_iter)
 
@@ -242,7 +275,7 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
         pool_names = build_pool(rng, n_total=n_detectors)
         detectors = materialize_pool(pool_names, rng)
 
-    stream = make_stream(drift_frequency, stream_length, seed, n_dimensions)
+    stream = materialize_stream(make_stream(drift_frequency, stream_length, seed, n_dimensions))
     stream_iter = iter(stream)
     first_x, _ = next(stream_iter)
 
@@ -312,7 +345,7 @@ def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
         pool_names = build_pool(rng, n_total=n_detectors)
         detectors = materialize_pool(pool_names, rng)
 
-    stream = make_stream(drift_frequency, stream_length, seed, n_dimensions)
+    stream = materialize_stream(make_stream(drift_frequency, stream_length, seed, n_dimensions))
 
     dummy_mopedds = _DummyMOPEDDS()
     deployment = ThreadsDeployment(
