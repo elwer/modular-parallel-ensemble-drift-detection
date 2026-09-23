@@ -34,13 +34,12 @@ N_REPEATS=3
 SEED=42
 SCENARIO="balanced"
 N_DIM=32
-MAX_K=32
 WALL_TIME="00:30:00"
 MEM_PER_CPU=1024
 
 PY_COMMON="--stream-length ${STREAM_LENGTH} --drift-frequency ${DRIFT_FREQ} \
 --n-repeats ${N_REPEATS} --seed ${SEED} --scenario ${SCENARIO} \
---n-dimensions ${N_DIM} --max-ensemble-size ${MAX_K}"
+--n-dimensions ${N_DIM}"
 
 # ---- Parse CLI flags ----
 DRY_RUN=0

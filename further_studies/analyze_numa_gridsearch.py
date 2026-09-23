@@ -89,8 +89,8 @@ def main():
                     help="Root directory containing per-config subdirectories")
     ap.add_argument("--export-csv", type=str, default=None,
                     help="Export summary table to CSV")
-    ap.add_argument("--target-k", type=int, default=32,
-                    help="Ensemble size to rank by (default 32)")
+    ap.add_argument("--target-k", type=int, default=64,
+                    help="Ensemble size to rank by (default 64)")
     args = ap.parse_args()
 
     results_root = Path(args.results_dir)
