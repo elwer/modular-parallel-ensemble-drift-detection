@@ -40,7 +40,7 @@ MEM_PER_CPU=1024
 
 PY_COMMON="--stream-length ${STREAM_LENGTH} --drift-frequency ${DRIFT_FREQ} \
 --n-repeats ${N_REPEATS} --seed ${SEED} --scenario ${SCENARIO} \
---n-dimensions ${N_DIM} --track-stats --max-ensemble-size ${MAX_K}"
+--n-dimensions ${N_DIM} --max-ensemble-size ${MAX_K}"
 
 # ---- Parse CLI flags ----
 DRY_RUN=0
