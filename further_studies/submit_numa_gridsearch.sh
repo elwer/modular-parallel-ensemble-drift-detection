@@ -34,7 +34,7 @@ N_REPEATS=3
 SEED=42
 SCENARIO="balanced"
 N_DIM=32
-WALL_TIME="00:30:00"
+WALL_TIME="06:00:00"
 MEM_PER_CPU=1024
 
 PY_COMMON="--stream-length ${STREAM_LENGTH} --drift-frequency ${DRIFT_FREQ} \
