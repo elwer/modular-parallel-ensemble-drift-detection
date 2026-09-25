@@ -7,7 +7,15 @@
 # because the compute/memory speed ratio shifts in favor of memory bandwidth.
 #
 # AMD EPYC 7702: base 2.0 GHz, boost up to ~3.35 GHz, min ~1.5 GHz
-# Slurm --cpu-freq accepts MHz values (e.g., 3350 = 3.35 GHz)
+# Available scaling frequencies: 2000000 1800000 1500000 (kHz)
+# Boost frequencies (up to ~3350 MHz) are controlled by the boost flag,
+# not by scaling_setspeed. We use:
+#   high = performance governor (boost enabled, up to ~3350 MHz)
+#   mid  = userspace governor at 2000000 kHz (2.0 GHz, no boost)
+#   low  = userspace governor at 1500000 kHz (1.5 GHz, no boost)
+#
+# Slurm --cpu-freq does NOT work on this cluster. We set frequency manually
+# via sysfs (scaling_governor + scaling_setspeed) on all cores.
 #
 # Usage:
 #   bash further_studies/submit_freq_study.sh           # submit all
@@ -37,12 +45,30 @@ PY_COMMON="--stream-length ${STREAM_LENGTH} --drift-frequency ${DRIFT_FREQ} \
 --n-repeats ${N_REPEATS} --seed ${SEED} --scenario ${SCENARIO} \
 --n-dimensions ${N_DIM}"
 
-# ---- Frequency levels (in MHz for Slurm --cpu-freq) ----
-# AMD EPYC 7702: min ~1500 MHz, base 2000 MHz, boost ~3350 MHz
+# ---- Frequency levels ----
+# Each level defines: governor, frequency in kHz (for userspace), boost flag
+# high: performance governor, boost=1 (CPU free to boost up to ~3350 MHz)
+# mid:  userspace governor, 2000000 kHz (2.0 GHz), boost=0
+# low:  userspace governor, 1500000 kHz (1.5 GHz), boost=0
+declare -A FREQ_GOVERNOR
+FREQ_GOVERNOR[high]="performance"
+FREQ_GOVERNOR[mid]="userspace"
+FREQ_GOVERNOR[low]="userspace"
+
+declare -A FREQ_KHZ
+FREQ_KHZ[high]=""           # performance governor — no fixed freq
+FREQ_KHZ[mid]="2000000"    # 2.0 GHz
+FREQ_KHZ[low]="1500000"    # 1.5 GHz
+
+declare -A FREQ_BOOST
+FREQ_BOOST[high]="1"        # boost enabled
+FREQ_BOOST[mid]="0"        # boost disabled
+FREQ_BOOST[low]="0"        # boost disabled
+
 declare -A FREQ_LABELS
-FREQ_LABELS[high]="3350"    # max boost
-FREQ_LABELS[mid]="2000"     # base clock
-FREQ_LABELS[low]="1500"     # minimum frequency
+FREQ_LABELS[high]="perf-boost"
+FREQ_LABELS[mid]="2000MHz"
+FREQ_LABELS[low]="1500MHz"
 
 # ---- Parse CLI flags ----
 DRY_RUN=0
@@ -63,8 +89,10 @@ submit_freq_config() {
     local numactl_cmd="$4"   # numactl prefix (empty = none)
     local srun_cmd="$5"      # srun prefix (empty = none)
     local py_extra="$6"     # extra python args (e.g. --pin-cpus)
-    local freq_mhz="$7"      # CPU frequency in MHz
-    local freq_label="$8"    # "high" | "mid" | "low"
+    local freq_governor="$7"  # scaling governor
+    local freq_khz="$8"       # frequency in kHz (empty for performance)
+    local freq_boost="$9"     # boost flag (0 or 1)
+    local freq_label="${10}"  # "high" | "mid" | "low"
 
     local name="${base_name}_${freq_label}"
 
@@ -95,7 +123,6 @@ submit_freq_config() {
 #SBATCH --time=${WALL_TIME}
 #SBATCH --mem-per-cpu=${MEM_PER_CPU}
 #SBATCH --exclusive
-#SBATCH --cpu-freq=${freq_mhz}
 ${slurm_extra}
 
 set -euo pipefail
@@ -111,7 +138,36 @@ export PYTHONUNBUFFERED=1
 OUTPUT_DIR="${output_dir}"
 mkdir -p "\${OUTPUT_DIR}"
 
-# Log NUMA topology, CPU frequency, and affinity for this job
+# ---- Set CPU frequency on ALL cores via sysfs ----
+FREQ_GOVERNOR="${freq_governor}"
+FREQ_KHZ_VAL="${freq_khz}"
+FREQ_BOOST_VAL="${freq_boost}"
+
+echo "Setting CPU frequency: governor=\${FREQ_GOVERNOR}, freq=\${FREQ_KHZ_VAL:-auto}, boost=\${FREQ_BOOST_VAL}"
+
+# Set boost flag (0=disabled, 1=enabled)
+if [[ -w /sys/devices/system/cpu/cpufreq/boost ]]; then
+    echo "\${FREQ_BOOST_VAL}" > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+fi
+
+# Set governor and frequency on all cores
+for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*; do
+    cpu_num=\$(echo "\$cpu_dir" | grep -oP 'cpu\K[0-9]+')
+    gov_file="\$cpu_dir/cpufreq/scaling_governor"
+    setspeed_file="\$cpu_dir/cpufreq/scaling_setspeed"
+
+    # Set governor
+    if [[ -w "\$gov_file" ]]; then
+        echo "\${FREQ_GOVERNOR}" > "\$gov_file" 2>/dev/null || true
+    fi
+
+    # Set frequency (only for userspace governor)
+    if [[ "\${FREQ_GOVERNOR}" == "userspace" ]] && [[ -n "\${FREQ_KHZ_VAL}" ]] && [[ -w "\$setspeed_file" ]]; then
+        echo "\${FREQ_KHZ_VAL}" > "\$setspeed_file" 2>/dev/null || true
+    fi
+done
+
+# ---- Log environment info ----
 echo "=== NUMA topology ===" > "\${OUTPUT_DIR}/env_info.txt"
 numactl --hardware >> "\${OUTPUT_DIR}/env_info.txt" 2>&1 || true
 echo "=== lscpu (relevant) ===" >> "\${OUTPUT_DIR}/env_info.txt"
@@ -122,7 +178,15 @@ echo "=== CPU affinity ===" >> "\${OUTPUT_DIR}/env_info.txt"
 taskset -cp \$\$ >> "\${OUTPUT_DIR}/env_info.txt" 2>&1 || true
 echo "=== numactl --show ===" >> "\${OUTPUT_DIR}/env_info.txt"
 numactl --show >> "\${OUTPUT_DIR}/env_info.txt" 2>&1 || true
-echo "=== CPU frequency (all cores) ===" >> "\${OUTPUT_DIR}/env_info.txt"
+echo "=== cpufreq available frequencies ===" >> "\${OUTPUT_DIR}/env_info.txt"
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies 2>/dev/null >> "\${OUTPUT_DIR}/env_info.txt" || echo "N/A" >> "\${OUTPUT_DIR}/env_info.txt"
+echo "=== boost flag ===" >> "\${OUTPUT_DIR}/env_info.txt"
+cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null >> "\${OUTPUT_DIR}/env_info.txt" || echo "N/A" >> "\${OUTPUT_DIR}/env_info.txt"
+echo "=== scaling_governor (cpu0) ===" >> "\${OUTPUT_DIR}/env_info.txt"
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null >> "\${OUTPUT_DIR}/env_info.txt" || echo "N/A" >> "\${OUTPUT_DIR}/env_info.txt"
+echo "=== scaling_setspeed (cpu0) ===" >> "\${OUTPUT_DIR}/env_info.txt"
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed 2>/dev/null >> "\${OUTPUT_DIR}/env_info.txt" || echo "N/A" >> "\${OUTPUT_DIR}/env_info.txt"
+echo "=== CPU frequency (all cores, AFTER setting) ===" >> "\${OUTPUT_DIR}/env_info.txt"
 for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
     if [[ -r "\$f" ]]; then
         core=\$(echo "\$f" | grep -oP 'cpu\K[0-9]+')
@@ -130,18 +194,13 @@ for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
         echo "cpu\${core}: \${freq} kHz (\$(echo "scale=3; \${freq}/1000000" | bc 2>/dev/null || echo '?') GHz)"
     fi
 done >> "\${OUTPUT_DIR}/env_info.txt" 2>&1 || true
-echo "=== cpufreq available frequencies ===" >> "\${OUTPUT_DIR}/env_info.txt"
-cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies 2>/dev/null >> "\${OUTPUT_DIR}/env_info.txt" || echo "N/A" >> "\${OUTPUT_DIR}/env_info.txt"
-echo "=== scaling_governor ===" >> "\${OUTPUT_DIR}/env_info.txt"
-cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null >> "\${OUTPUT_DIR}/env_info.txt" || echo "N/A" >> "\${OUTPUT_DIR}/env_info.txt"
-echo "=== SLURM_CPU_FREQ_REQ ===" >> "\${OUTPUT_DIR}/env_info.txt"
-echo "\${SLURM_CPU_FREQ_REQ:-not_set}" >> "\${OUTPUT_DIR}/env_info.txt"
+echo "=== cpuinfo MHz (first 8 cores) ===" >> "\${OUTPUT_DIR}/env_info.txt"
+grep "cpu MHz" /proc/cpuinfo | head -8 >> "\${OUTPUT_DIR}/env_info.txt" 2>&1 || true
 
-echo "Running config: ${name} (freq=${freq_mhz} MHz, label=${freq_label})"
+echo "Running config: ${name} (governor=\${FREQ_GOVERNOR}, freq=\${FREQ_KHZ_VAL:-auto}, boost=\${FREQ_BOOST_VAL})"
 echo "numactl: [${numactl_cmd}]"
 echo "srun:    [${srun_cmd}]"
 echo "py_extra:[${py_extra}]"
-echo "CPU freq target: ${freq_mhz} MHz"
 
 ${cmd_prefix} \\
     ${py_args} \\
@@ -180,7 +239,10 @@ submit_all_freqs() {
     for freq_label in high mid low; do
         submit_freq_config "$name" "$slurm_extra" "$cpus" \
             "$numactl_cmd" "$srun_cmd" "$py_extra" \
-            "${FREQ_LABELS[$freq_label]}" "$freq_label"
+            "${FREQ_GOVERNOR[$freq_label]}" \
+            "${FREQ_KHZ[$freq_label]}" \
+            "${FREQ_BOOST[$freq_label]}" \
+            "$freq_label"
     done
 }
 
