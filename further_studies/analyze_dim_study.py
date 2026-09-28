@@ -139,16 +139,17 @@ def main():
                 row_str += f" {'N/A':>12}"
         print(row_str)
 
-    # Speedup improvement from dim=4 to max dim
+    # Speedup improvement from min dim to max dim
+    min_dim = min(dims)
     max_dim = max(dims)
     print(f"\n{'='*90}")
-    print(f"Speedup improvement: dim=4 -> dim={max_dim}")
+    print(f"Speedup improvement: dim={min_dim} -> dim={max_dim}")
     print(f"{'='*90}")
-    print(f"{'K':>6} {'dim=4':>10} {f'dim={max_dim}':>10} {'Delta':>10} {'Delta%':>10}")
+    print(f"{'K':>6} {f'dim={min_dim}':>10} {f'dim={max_dim}':>10} {'Delta':>10} {'Delta%':>10}")
     print(f"{'-'*6} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
 
     for k in all_k:
-        low_dim = [r for r in all_rows if r["K"] == k and r["n_dimensions"] == 4]
+        low_dim = [r for r in all_rows if r["K"] == k and r["n_dimensions"] == min_dim]
         high_dim = [r for r in all_rows if r["K"] == k and r["n_dimensions"] == max_dim]
         if not low_dim or not high_dim:
             continue
