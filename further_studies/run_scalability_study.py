@@ -480,6 +480,11 @@ def main():
     max_pool_size = max(ensemble_sizes) if ensemble_sizes else max(ENSEMBLE_SIZES)
 
     all_results = []
+    out_path = os.path.join(args.output_dir, "scalability_results.json")
+
+    def save_partial():
+        with open(out_path, "w") as f:
+            json.dump(all_results, f, indent=2)
 
     # ---- Single-detector baselines ----
     logger.info(f"\n{'='*60}")
@@ -509,6 +514,7 @@ def main():
             result["detector_type"] = pool_names[i]
             result["detector_idx"] = i
             all_results.append(result)
+            save_partial()
             logger.info(f"  -> {result['throughput_sps']:.1f} sps, "
                         f"{result['latency_ms']:.2f} ms/sample")
 
@@ -533,6 +539,7 @@ def main():
             result["seed"] = seed
             result["mode"] = "sequential"
             all_results.append(result)
+            save_partial()
             logger.info(f"  -> {result['throughput_sps']:.1f} sps, "
                         f"{result['latency_ms']:.2f} ms/sample, "
                         f"{result['elapsed_sec']:.2f}s total")
@@ -601,6 +608,7 @@ def main():
             result["seed"] = seed
             result["mode"] = "ensemble"
             all_results.append(result)
+            save_partial()
             logger.info(f"  -> {result['throughput_sps']:.1f} sps, "
                         f"{result['latency_ms']:.2f} ms/sample, "
                         f"{result['elapsed_sec']:.2f}s total")
@@ -702,10 +710,8 @@ def main():
         print(f"  Main wait% = fraction of wall time main thread spends spinning on results")
         print(f"  Contend    = how much slower detector.update() is in parallel vs single (1.0x = no penalty)")
 
-    # Save JSON
-    out_path = os.path.join(args.output_dir, "scalability_results.json")
-    with open(out_path, "w") as f:
-        json.dump(all_results, f, indent=2)
+    # Save JSON (final write, already saved incrementally)
+    save_partial()
     logger.info(f"Results saved to {out_path}")
 
     # Save CSV

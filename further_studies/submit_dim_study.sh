@@ -27,7 +27,7 @@ DRIFT_FREQ=100
 N_REPEATS=3
 SEED=42
 SCENARIO="balanced"
-WALL_TIME="06:00:00"
+WALL_TIME="24:00:00"
 MEM_PER_CPU=1024
 
 # Use full node: test scaling across all hardware boundaries
