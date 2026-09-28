@@ -30,9 +30,11 @@ SCENARIO="balanced"
 WALL_TIME="06:00:00"
 MEM_PER_CPU=1024
 
-# Best config: 2 NUMA domains (same socket), pinned CPUs
-CPU_LIST="0-31"
-NUMACTL_MEM="--interleave=0-1"
+# Use full node: test scaling across all hardware boundaries
+# K=3 (1 CCX), K=7 (2 CCX), K=15 (1 NUMA), K=31 (2 NUMA), K=63 (1 socket), K=127 (full node)
+CPU_LIST="0-127"
+NUMACTL_MEM="--interleave=all"
+ENSEMBLE_SIZES="3,7,15,31,63,127"
 
 # ---- Parse CLI flags ----
 DRY_RUN=0
@@ -113,7 +115,7 @@ numactl ${NUMACTL_MEM} taskset -c ${CPU_LIST} \\
     python -u further_studies/run_scalability_study.py \\
     --stream-length ${STREAM_LENGTH} --drift-frequency ${DRIFT_FREQ} \\
     --n-repeats ${N_REPEATS} --seed ${SEED} --scenario ${SCENARIO} \\
-    --n-dimensions ${n_dim} --pin-cpus \\
+    --n-dimensions ${n_dim} --pin-cpus --ensemble-sizes ${ENSEMBLE_SIZES} \\
     --output-dir "\${OUTPUT_DIR}" \\
     2>&1 | tee "\${OUTPUT_DIR}/scalability.log"
 EOF

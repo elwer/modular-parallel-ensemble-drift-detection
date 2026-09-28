@@ -464,13 +464,19 @@ def main():
                     help="Pin worker threads to specific CPU cores (CPU 0 reserved for main thread)")
     ap.add_argument("--n-dimensions", type=int, default=4,
                     help="Number of features per datapoint (default 4, increase for heavier work per sample)")
+    ap.add_argument("--ensemble-sizes", type=str, default=None,
+                    help="Comma-separated list of ensemble sizes (e.g. '3,7,15,31,63,127'). "
+                         "Overrides default sizes. Use n-1 values to align with hardware boundaries.")
     args = ap.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    ensemble_sizes = ENSEMBLE_SIZES
+    if args.ensemble_sizes is not None:
+        ensemble_sizes = [int(s.strip()) for s in args.ensemble_sizes.split(",")]
+    else:
+        ensemble_sizes = ENSEMBLE_SIZES
     if args.max_ensemble_size is not None:
-        ensemble_sizes = [s for s in ENSEMBLE_SIZES if s <= args.max_ensemble_size]
+        ensemble_sizes = [s for s in ensemble_sizes if s <= args.max_ensemble_size]
     max_pool_size = max(ensemble_sizes) if ensemble_sizes else max(ENSEMBLE_SIZES)
 
     all_results = []
