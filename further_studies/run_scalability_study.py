@@ -187,8 +187,8 @@ def build_balanced_pool(n_detectors, rng):
     per feature, so higher-dimensional streams produce heavier per-sample work.
     """
     names = ["BNDM"] * n_detectors
-    params = {"n_samples": 5, "threshold": 0.01, "max_depth": 5,
-              "recent_samples_size": 5}
+    params = {"n_samples": 50, "threshold": 0.01, "max_depth": 3,
+              "recent_samples_size": 50}
     from main_synthetic import get_detector_class
     cls = get_detector_class(CLASS_PATH["BNDM"])
     detectors = []
@@ -496,8 +496,9 @@ def main():
         else:
             pool_names = build_pool(rng, n_total=max_pool_size)
             detectors = materialize_pool(pool_names, rng)
-        for i, det in enumerate(detectors):
-            logger.info(f"  Rep {rep+1}/{args.n_repeats} detector {i+1}/{len(detectors)} "
+        n_single_baselines = min(3, len(detectors))
+        for i, det in enumerate(detectors[:n_single_baselines]):
+            logger.info(f"  Rep {rep+1}/{args.n_repeats} detector {i+1}/{n_single_baselines} "
                         f"({pool_names[i]})")
             result = run_single_benchmark(
                 det, args.stream_length, args.drift_frequency, seed,
