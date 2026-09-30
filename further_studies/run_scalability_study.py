@@ -180,17 +180,39 @@ def materialize_pool(pool_names, rng):
     return detectors
 
 
-def build_balanced_pool(n_detectors, rng):
-    """All detectors are the same type (BNDM) with identical params.
+BALANCED_DEFAULTS = {
+    "BNDM": {"n_samples": 10, "threshold": 0.01, "max_depth": 4,
+             "recent_samples_size": 10},
+    "UDetect": {"n_windows": 10, "n_samples": 50,
+                "disjoint_training_windows": True,
+                "recent_samples_size": 500},
+    "SPLL": {"n_samples": 500, "n_clusters": 5, "threshold": 0.5,
+             "recent_samples_size": 500},
+    "D3": {"n_reference_samples": 500, "recent_samples_proportion": 1,
+           "threshold": 0.8, "recent_samples_size": 500},
+    "OCDD": {"n_samples": 100, "threshold": 0.3,
+             "recent_samples_size": 500},
+    "CSDDM": {"n_samples": 50, "n_clusters": 5, "confidence": 0.05,
+              "feature_proportion": 0.1, "recent_samples_size": 500},
+    "IBDD": {"n_samples": 300, "n_consecutive_deviations": 1,
+             "n_permutations": 20, "update_interval": 50,
+             "recent_samples_size": 500},
+}
 
-    BNDM scales with n_features: its detection step runs a Polya tree test
-    per feature, so higher-dimensional streams produce heavier per-sample work.
+
+def build_balanced_pool(n_detectors, rng, detector_name="BNDM", detector_params=None):
+    """All detectors are the same type with identical params.
+
+    Defaults per detector type are defined in BALANCED_DEFAULTS.
+    Override with detector_params (dict).
     """
-    names = ["BNDM"] * n_detectors
-    params = {"n_samples": 10, "threshold": 0.01, "max_depth": 4,
-              "recent_samples_size": 10}
+    if detector_params is None:
+        params = BALANCED_DEFAULTS.get(detector_name, {})
+    else:
+        params = detector_params
+    names = [detector_name] * n_detectors
     from main_synthetic import get_detector_class
-    cls = get_detector_class(CLASS_PATH["BNDM"])
+    cls = get_detector_class(CLASS_PATH[detector_name])
     detectors = []
     for i in range(n_detectors):
         det = cls(seed=rng.randint(0, 99999), **params)
@@ -257,7 +279,8 @@ def run_single_benchmark(detector, stream_length, drift_frequency, seed,
 
 def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
                                seed, scenario="random", decision_window=10,
-                               n_dimensions=4):
+                               n_dimensions=4, detector_name="BNDM",
+                               detector_params=None):
     """Run n_detectors DDs sequentially (no threading) on a stream.
 
     Replicates the same computation as ThreadsDeployment: for each sample,
@@ -268,7 +291,9 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
     rng = random.Random(seed)
 
     if scenario == "balanced":
-        pool_names, detectors = build_balanced_pool(n_detectors, rng)
+        pool_names, detectors = build_balanced_pool(n_detectors, rng,
+                                                    detector_name=detector_name,
+                                                    detector_params=detector_params)
     elif scenario == "unbalanced":
         pool_names, detectors = build_unbalanced_pool(n_detectors, rng)
     else:
@@ -333,12 +358,15 @@ def run_sequential_benchmark(n_detectors, stream_length, drift_frequency,
 def run_scalability_benchmark(n_detectors, stream_length, drift_frequency,
                               seed, decision_window=10, scenario="random",
                               track_stats=False, pin_cpus=False,
-                              single_update_time=None, n_dimensions=4):
+                              single_update_time=None, n_dimensions=4,
+                              detector_name="BNDM", detector_params=None):
     """Deploy n_detectors DDs via ThreadsDeployment and run a stream."""
     rng = random.Random(seed)
 
     if scenario == "balanced":
-        pool_names, detectors = build_balanced_pool(n_detectors, rng)
+        pool_names, detectors = build_balanced_pool(n_detectors, rng,
+                                                    detector_name=detector_name,
+                                                    detector_params=detector_params)
     elif scenario == "unbalanced":
         pool_names, detectors = build_unbalanced_pool(n_detectors, rng)
     else:  # random
@@ -467,7 +495,17 @@ def main():
     ap.add_argument("--ensemble-sizes", type=str, default=None,
                     help="Comma-separated list of ensemble sizes (e.g. '3,7,15,31,63,127'). "
                          "Overrides default sizes. Use n-1 values to align with hardware boundaries.")
+    ap.add_argument("--detector", type=str, default="BNDM",
+                    choices=list(CLASS_PATH.keys()),
+                    help="Detector type for balanced scenario (default BNDM)")
+    ap.add_argument("--detector-params", type=str, default=None,
+                    help="JSON dict of detector params (overrides defaults for --detector)")
     args = ap.parse_args()
+
+    import json as _json
+    detector_params = None
+    if args.detector_params:
+        detector_params = _json.loads(args.detector_params)
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -495,7 +533,9 @@ def main():
         seed = args.seed + rep * 1000
         rng = random.Random(seed)
         if args.scenario == "balanced":
-            pool_names, detectors = build_balanced_pool(max_pool_size, rng)
+            pool_names, detectors = build_balanced_pool(max_pool_size, rng,
+                                                        detector_name=args.detector,
+                                                        detector_params=detector_params)
         elif args.scenario == "unbalanced":
             pool_names, detectors = build_unbalanced_pool(max_pool_size, rng)
         else:
@@ -534,6 +574,8 @@ def main():
                 seed=seed,
                 scenario=args.scenario,
                 n_dimensions=args.n_dimensions,
+                detector_name=args.detector,
+                detector_params=detector_params,
             )
             result["rep"] = rep
             result["seed"] = seed
@@ -584,6 +626,8 @@ def main():
                             pin_cpus=args.pin_cpus,
                             single_update_time=single_update_time,
                             n_dimensions=args.n_dimensions,
+                            detector_name=args.detector,
+                            detector_params=detector_params,
                         )
                 else:
                     result = run_scalability_benchmark(
@@ -596,6 +640,8 @@ def main():
                         pin_cpus=args.pin_cpus,
                         single_update_time=single_update_time,
                         n_dimensions=args.n_dimensions,
+                        detector_name=args.detector,
+                        detector_params=detector_params,
                     )
             finally:
                 if jumper_service is not None:
