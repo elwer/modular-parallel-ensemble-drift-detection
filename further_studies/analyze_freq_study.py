@@ -2,11 +2,12 @@
 """
 Analyze CPU frequency study results.
 
-Compares speedup across frequency levels (high/mid/low) for each NUMA config.
-Tests the hypothesis: if memory-bound, lower CPU frequency → higher speedup.
+Compares speedup across frequency levels for each NUMA config.
+Tests the hypothesis: if memory-bound, lower CPU frequency -> higher speedup.
 
 Usage:
     python further_studies/analyze_freq_study.py
+    python further_studies/analyze_freq_study.py --results-dir further_studies/results_freq_study_intel
     python further_studies/analyze_freq_study.py --export-csv further_studies/freq_study_summary.csv
     python further_studies/analyze_freq_study.py --target-k 32
 """
@@ -19,8 +20,14 @@ from pathlib import Path
 import numpy as np
 
 
-FREQ_ORDER = ["high", "mid", "low"]
-FREQ_MHZ = {"high": 3350, "mid": 2000, "low": 1500}
+# Known frequency labels and their MHz values.
+# New labels can be added here; unknown labels are auto-detected from dir names.
+KNOWN_FREQ_MHZ = {
+    "high": 3350,
+    "mid": 2000,
+    "low": 1500,
+    "ultra_low": 800,
+}
 
 
 def load_config_results(config_dir):
@@ -29,6 +36,24 @@ def load_config_results(config_dir):
         return None
     with open(json_path) as f:
         return json.load(f)
+
+
+def detect_freq_mhz(config_dir, freq_label):
+    """Try to read actual frequency from env_info.txt, fall back to KNOWN_FREQ_MHZ."""
+    env_info = config_dir / "env_info.txt"
+    if env_info.exists():
+        try:
+            with open(env_info) as f:
+                for line in f:
+                    if "scaling_setspeed" in line.lower() and "khz" in line.lower():
+                        parts = line.split()
+                        for p in parts:
+                            p = p.strip()
+                            if p.isdigit() and len(p) >= 5:
+                                return int(p) // 1000
+        except Exception:
+            pass
+    return KNOWN_FREQ_MHZ.get(freq_label, 0)
 
 
 def extract_speedup(results, ensemble_sizes):
@@ -96,13 +121,16 @@ def main():
         sys.exit(1)
 
     # Parse config names into (base_config, freq_label)
+    # Auto-detect frequency labels from directory names
     configs = {}
+    detected_freq_labels = set()
     for d in config_dirs:
         name = d.name
         parts = name.rsplit("_", 1)
-        if len(parts) != 2 or parts[1] not in FREQ_ORDER:
+        if len(parts) != 2:
             continue
         base, freq = parts
+        detected_freq_labels.add(freq)
         if base not in configs:
             configs[base] = {}
         results = load_config_results(d)
@@ -115,45 +143,81 @@ def main():
             "throughput": extract_throughput(results, ensemble_sizes),
             "wall_time": extract_wall_time(results, ensemble_sizes),
             "ensemble_sizes": ensemble_sizes,
+            "freq_mhz": detect_freq_mhz(d, freq),
         }
 
     if not configs:
         print("No valid config results found.")
         sys.exit(1)
 
+    # Build ordered frequency list (sorted by MHz descending)
+    freq_order = sorted(detected_freq_labels,
+                        key=lambda fl: configs[next(iter(configs))].get(fl, {}).get("freq_mhz", 0),
+                        reverse=True)
+
+    # Map freq labels to MHz for display
+    freq_mhz = {}
+    for fl in freq_order:
+        for base in configs:
+            if fl in configs[base]:
+                freq_mhz[fl] = configs[base][fl].get("freq_mhz", KNOWN_FREQ_MHZ.get(fl, 0))
+                break
+        if fl not in freq_mhz:
+            freq_mhz[fl] = KNOWN_FREQ_MHZ.get(fl, 0)
+
+    # Highest and lowest freq labels for delta calculation
+    highest_fl = freq_order[0] if freq_order else None
+    lowest_fl = freq_order[-1] if len(freq_order) > 1 else highest_fl
+
     # ---- Print speedup comparison table ----
     target_k = args.target_k
     print(f"\n{'='*100}")
-    print(f"  CPU Frequency Study — Speedup at K={target_k}")
-    print(f"  Hypothesis: if memory-bound, lower freq → higher speedup")
-    print(f"  Frequencies: high={FREQ_MHZ['high']} MHz, mid={FREQ_MHZ['mid']} MHz, low={FREQ_MHZ['low']} MHz")
+    print(f"  CPU Frequency Study - Speedup at K={target_k}")
+    print(f"  Hypothesis: if memory-bound, lower freq -> higher speedup")
+    freq_desc = ", ".join(f"{fl}={freq_mhz[fl]} MHz" for fl in freq_order)
+    print(f"  Frequencies: {freq_desc}")
     print(f"{'='*100}")
-    print(f"  {'Config':<28} {'High (3350)':>12} {'Mid (2000)':>12} {'Low (1500)':>12} "
-          f"{'Δ(H→L)':>10} {'Trend':>8}")
-    print(f"  {'-'*28} {'-'*12} {'-'*12} {'-'*12} {'-'*10} {'-'*8}")
+
+    # Build header
+    header = f"  {'Config':<28}"
+    for fl in freq_order:
+        header += f" {fl}({freq_mhz[fl]}):>12}"
+    if highest_fl and lowest_fl and highest_fl != lowest_fl:
+        header += f" {'D':>10} {'Trend':>8}"
+    print(header)
+    sep = f"  {'-'*28}"
+    for _ in freq_order:
+        sep += f" {'-'*12}"
+    if highest_fl and lowest_fl and highest_fl != lowest_fl:
+        sep += f" {'-'*10} {'-'*8}"
+    print(sep)
 
     ranked = []
     for base in sorted(configs.keys()):
         freqs = configs[base]
-        s_high = freqs.get("high", {}).get("speedup", {}).get(target_k, None)
-        s_mid = freqs.get("mid", {}).get("speedup", {}).get(target_k, None)
-        s_low = freqs.get("low", {}).get("speedup", {}).get(target_k, None)
+        vals = {}
+        for fl in freq_order:
+            vals[fl] = freqs.get(fl, {}).get("speedup", {}).get(target_k, None)
 
-        if s_high is None or s_low is None:
+        if vals.get(highest_fl) is None or vals.get(lowest_fl) is None:
             continue
 
-        delta = s_low - s_high
+        delta = vals[lowest_fl] - vals[highest_fl]
         trend = "↑" if delta > 0.1 else ("↓" if delta < -0.1 else "→")
 
-        ranked.append((base, s_high, s_mid, s_low, delta, trend))
+        ranked.append((base, vals, delta, trend))
 
     # Sort by delta (largest improvement at low freq first)
-    ranked.sort(key=lambda x: x[4], reverse=True)
+    ranked.sort(key=lambda x: x[2], reverse=True)
 
-    for base, s_high, s_mid, s_low, delta, trend in ranked:
-        s_mid_str = f"{s_mid:.2f}x" if s_mid is not None else "N/A"
-        print(f"  {base:<28} {s_high:>10.2f}x {s_mid_str:>12} {s_low:>10.2f}x "
-              f"{delta:>+8.2f}x {trend:>8}")
+    for base, vals, delta, trend in ranked:
+        row = f"  {base:<28}"
+        for fl in freq_order:
+            v = vals.get(fl)
+            row += f" {v:>10.2f}x" if v is not None else f" {'N/A':>12}"
+        if highest_fl != lowest_fl:
+            row += f" {delta:>+8.2f}x {trend:>8}"
+        print(row)
 
     # ---- Print full speedup table across all K ----
     print(f"\n{'='*100}")
@@ -170,22 +234,28 @@ def main():
         freqs = configs[base]
         print(f"\n  --- {base} ---")
         header = f"  {'K':>6}"
-        for fl in FREQ_ORDER:
+        for fl in freq_order:
             header += f" {fl:>10}"
-        header += f" {'Δ(H→L)':>10}"
+        if highest_fl != lowest_fl:
+            header += f" {'D':>10}"
         print(header)
-        print(f"  {'-'*6} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
+        sep = f"  {'-'*6}"
+        for _ in freq_order:
+            sep += f" {'-'*10}"
+        if highest_fl != lowest_fl:
+            sep += f" {'-'*10}"
+        print(sep)
         for k in all_ks:
             row = f"  {k:>6}"
             vals = {}
-            for fl in FREQ_ORDER:
+            for fl in freq_order:
                 v = freqs.get(fl, {}).get("speedup", {}).get(k, None)
                 vals[fl] = v
                 row += f" {v:>9.2f}x" if v is not None else f" {'N/A':>10}"
-            if vals.get("high") is not None and vals.get("low") is not None:
-                d = vals["low"] - vals["high"]
+            if highest_fl != lowest_fl and vals.get(highest_fl) is not None and vals.get(lowest_fl) is not None:
+                d = vals[lowest_fl] - vals[highest_fl]
                 row += f" {d:>+8.2f}x"
-            else:
+            elif highest_fl != lowest_fl:
                 row += f" {'N/A':>10}"
             print(row)
 
@@ -193,39 +263,52 @@ def main():
     print(f"\n{'='*100}")
     print(f"  Throughput at K={target_k} (samples/sec)")
     print(f"{'='*100}")
-    print(f"  {'Config':<28} {'High':>12} {'Mid':>12} {'Low':>12} {'Δ(H→L)':>12}")
-    print(f"  {'-'*28} {'-'*12} {'-'*12} {'-'*12} {'-'*12}")
+    header = f"  {'Config':<28}"
+    for fl in freq_order:
+        header += f" {fl:>12}"
+    if highest_fl != lowest_fl:
+        header += f" {'D':>12}"
+    print(header)
+    sep = f"  {'-'*28}"
+    for _ in freq_order:
+        sep += f" {'-'*12}"
+    if highest_fl != lowest_fl:
+        sep += f" {'-'*12}"
+    print(sep)
     for base in sorted(configs.keys()):
         freqs = configs[base]
-        t_high = freqs.get("high", {}).get("throughput", {}).get(target_k, None)
-        t_mid = freqs.get("mid", {}).get("throughput", {}).get(target_k, None)
-        t_low = freqs.get("low", {}).get("throughput", {}).get(target_k, None)
-        if t_high is None or t_low is None:
-            continue
-        delta = t_low - t_high
-        t_mid_str = f"{t_mid:.1f}" if t_mid is not None else "N/A"
-        print(f"  {base:<28} {t_high:>10.1f} {t_mid_str:>12} {t_low:>10.1f} {delta:>+10.1f}")
+        row = f"  {base:<28}"
+        vals = {}
+        for fl in freq_order:
+            v = freqs.get(fl, {}).get("throughput", {}).get(target_k, None)
+            vals[fl] = v
+            row += f" {v:>10.1f}" if v is not None else f" {'N/A':>12}"
+        if highest_fl != lowest_fl and vals.get(highest_fl) is not None and vals.get(lowest_fl) is not None:
+            d = vals[lowest_fl] - vals[highest_fl]
+            row += f" {d:>+10.1f}"
+        elif highest_fl != lowest_fl:
+            row += f" {'N/A':>12}"
+        print(row)
 
     # ---- Summary ----
     print(f"\n{'='*100}")
     print(f"  Summary at K={target_k}")
     print(f"{'='*100}")
     if ranked:
-        best_mem_bound = ranked[0]
-        worst_mem_bound = ranked[-1]
-        print(f"  Most memory-bound (largest speedup increase at low freq):")
-        print(f"    {best_mem_bound[0]}: {best_mem_bound[1]:.2f}x → {best_mem_bound[3]:.2f}x (Δ={best_mem_bound[4]:+.2f}x)")
-        print(f"  Least memory-bound (speedup decreases or flat at low freq):")
-        print(f"    {worst_mem_bound[0]}: {worst_mem_bound[1]:.2f}x → {worst_mem_bound[3]:.2f}x (Δ={worst_mem_bound[4]:+.2f}x)")
+        best = ranked[0]
+        worst = ranked[-1]
+        print(f"  Most synchronization-bound (largest speedup increase at low freq):")
+        print(f"    {best[0]}: {best[1].get(highest_fl, 0):.2f}x -> {best[1].get(lowest_fl, 0):.2f}x (D={best[2]:+.2f}x)")
+        print(f"  Least synchronization-bound (speedup decreases or flat at low freq):")
+        print(f"    {worst[0]}: {worst[1].get(highest_fl, 0):.2f}x -> {worst[1].get(lowest_fl, 0):.2f}x (D={worst[2]:+.2f}x)")
 
-        # Count how many configs show the expected trend
-        mem_bound_count = sum(1 for r in ranked if r[4] > 0.1)
+        sync_bound_count = sum(1 for r in ranked if r[2] > 0.1)
         total = len(ranked)
-        print(f"\n  Configs with speedup increasing at low freq: {mem_bound_count}/{total}")
-        if mem_bound_count > total / 2:
-            print(f"  → Majority of configs show memory-bound behavior ✓")
+        print(f"\n  Configs with speedup increasing at low freq: {sync_bound_count}/{total}")
+        if sync_bound_count > total / 2:
+            print(f"  -> Majority of configs show synchronization-bound behavior")
         else:
-            print(f"  → Majority of configs do NOT show memory-bound behavior ✗")
+            print(f"  -> Majority of configs do NOT show synchronization-bound behavior")
 
     # ---- CSV export ----
     if args.export_csv:
@@ -237,7 +320,7 @@ def main():
             for base in sorted(configs.keys()):
                 freqs = configs[base]
                 for k in all_ks:
-                    for fl in FREQ_ORDER:
+                    for fl in freq_order:
                         fd = freqs.get(fl)
                         if fd is None:
                             continue
@@ -245,7 +328,7 @@ def main():
                         t = fd["throughput"].get(k)
                         wt = fd["wall_time"].get(k)
                         if s is not None:
-                            w.writerow([base, k, fl, FREQ_MHZ[fl], s,
+                            w.writerow([base, k, fl, freq_mhz.get(fl, 0), s,
                                         t if t is not None else "",
                                         wt if wt is not None else ""])
         print(f"\n  CSV exported to: {args.export_csv}")
