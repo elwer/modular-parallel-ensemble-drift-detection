@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ============================================================
 
-DETECTORS = ["SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD"]
+DETECTORS = ["BNDM", "SPLL", "UDetect", "D3", "OCDD", "CSDDM", "IBDD"]
 
 DRIFT_FREQS = [200, 500, 1000]
 STREAM_LENGTH = 2000
@@ -787,6 +787,7 @@ def main():
     global M_STREAMS, GENERATORS_LIST, DRIFT_FREQS_LIST, TOLERANCES_LIST
     global SUPPRESSIONS_LIST, N_GENERALIST_TRIALS
     global N_BUDGET_MAX, N_BUDGET_STEP, ENSEMBLE_F1_THRESHOLD, EXPERT_MIN_VAL_F1
+    global DETECTORS
 
     ap = argparse.ArgumentParser(description="Ensemble vs Generalist Comparison")
     ap.add_argument("--n-folds", type=int, default=N_FOLDS)
@@ -807,7 +808,13 @@ def main():
                     help="Cross-DD ensemble F1 threshold to stop budget search")
     ap.add_argument("--expert-min-val-f1", type=float, default=EXPERT_MIN_VAL_F1,
                     help="Min val F1 for a DD type to be included in per-DD ensembles")
+    ap.add_argument("--detectors", type=str, default=None,
+                    help="Comma-separated detector types to include (e.g. 'BNDM'). "
+                         "Overrides default DETECTORS list.")
     args = ap.parse_args()
+
+    if args.detectors:
+        DETECTORS = [d.strip() for d in args.detectors.split(",")]
 
     if args.drift_freqs:
         DRIFT_FREQS = [int(x) for x in args.drift_freqs.split(",")]
