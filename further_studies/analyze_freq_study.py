@@ -121,15 +121,28 @@ def main():
         sys.exit(1)
 
     # Parse config names into (base_config, freq_label)
-    # Auto-detect frequency labels from directory names
+    # Known freq labels may contain underscores (e.g. ultra_low), so check
+    # against known labels first, then fall back to auto-detection.
+    known_freq_labels = list(KNOWN_FREQ_MHZ.keys())
+
     configs = {}
     detected_freq_labels = set()
     for d in config_dirs:
         name = d.name
-        parts = name.rsplit("_", 1)
-        if len(parts) != 2:
-            continue
-        base, freq = parts
+        freq = None
+        base = None
+        # Try known labels first (handles ultra_low etc.)
+        for kfl in known_freq_labels:
+            if name.endswith("_" + kfl):
+                freq = kfl
+                base = name[:-(len(kfl) + 1)]
+                break
+        # Fall back to rsplit for unknown labels
+        if freq is None:
+            parts = name.rsplit("_", 1)
+            if len(parts) != 2:
+                continue
+            base, freq = parts
         detected_freq_labels.add(freq)
         if base not in configs:
             configs[base] = {}
