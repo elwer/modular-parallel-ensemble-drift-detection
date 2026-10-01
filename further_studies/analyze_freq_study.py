@@ -123,7 +123,7 @@ def main():
     # Parse config names into (base_config, freq_label)
     # Known freq labels may contain underscores (e.g. ultra_low), so check
     # against known labels first, then fall back to auto-detection.
-    known_freq_labels = list(KNOWN_FREQ_MHZ.keys())
+    known_freq_labels = sorted(KNOWN_FREQ_MHZ.keys(), key=len, reverse=True)
 
     configs = {}
     detected_freq_labels = set()
