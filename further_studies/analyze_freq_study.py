@@ -181,7 +181,8 @@ def main():
     # Build header
     header = f"  {'Config':<28}"
     for fl in freq_order:
-        header += f" {fl}({freq_mhz[fl]}):>12}"
+        label = f"{fl}({freq_mhz[fl]})"
+        header += f" {label:>12}"
     if highest_fl and lowest_fl and highest_fl != lowest_fl:
         header += f" {'D':>10} {'Trend':>8}"
     print(header)
